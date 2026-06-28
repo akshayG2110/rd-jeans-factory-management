@@ -30,7 +30,7 @@ class EmployeeWiseUpad(BaseModel):
     transaction_count: int
 
 class DateWiseUpad(BaseModel):
-    date: datetime_date
+    date: date
     total_amount: Decimal
     transaction_count: int
 
@@ -101,14 +101,14 @@ class RollReportResponse(ResponseEnvelope[RollReportData]):
 
 # ================= Cutting Report =================
 class DailyCuttingSummary(BaseModel):
-    date: datetime_date
+    date: date
     total_lots: int
     total_pieces_generated: int
     total_meters_used: Decimal
 
 class LotWiseProduction(BaseModel):
     lot_number: str
-    cutting_date: datetime_date
+    cutting_date: date
     fabric_type: str
     piece_count: int
     size: str
@@ -132,7 +132,7 @@ class CuttingReportResponse(ResponseEnvelope[CuttingReportData]):
 
 # ================= Income Report =================
 class DailyIncomeSummary(BaseModel):
-    date: datetime_date
+    date: date
     total_amount: Decimal
 
 class IncomeSourceSummary(BaseModel):
@@ -174,7 +174,7 @@ class ExpenseReportResponse(ResponseEnvelope[ExpenseReportData]):
 
 # ================= Cash Book Report =================
 class CashFlowReportEntry(BaseModel):
-    date: datetime_date
+    date: date
     income_sum: Decimal
     out_sum: Decimal
     net_flow: Decimal
