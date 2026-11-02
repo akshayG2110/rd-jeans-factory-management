@@ -12,9 +12,11 @@ import {
   Scissors, 
   ClipboardList, 
   Eye, 
-  HelpCircle 
+  HelpCircle,
+  UserCheck,
+  Package
 } from "lucide-react"
-import { getStoredData, type CuttingEntry, type CuttingHistoryLog, type FabricReceive } from "@/lib/employee-store"
+import { getStoredData, fetchFinishedGoods, type CuttingEntry, type CuttingHistoryLog, type FabricReceive, type FinishedGoodsItem } from "@/lib/employee-store"
 
 interface Props {
   params: Promise<{ id: string }>
@@ -28,22 +30,25 @@ export default function CuttingDetailsPage({ params }: Props) {
   const [entry, setEntry] = useState<CuttingEntry | null>(null)
   const [logs, setLogs] = useState<CuttingHistoryLog[]>([])
   const [rolls, setRolls] = useState<FabricReceive[]>([])
+  const [finishedGoods, setFinishedGoods] = useState<FinishedGoodsItem[]>([])
 
   useEffect(() => {
     setMounted(true)
     const loadData = async () => {
-    const data = await getStoredData()
-    setLogs(data.cuttingHistoryLogs)
-    setRolls(data.fabricReceives)
+      const data = await getStoredData()
+      setLogs(data.cuttingHistoryLogs)
+      setRolls(data.fabricReceives)
 
-    const cut = data.cuttings.find((c) => c.id === id)
-    if (cut) {
-      setEntry(cut)
+      const cut = data.cuttings.find((c) => c.id === id)
+      if (cut) {
+        setEntry(cut)
+      }
+
+      const goods = await fetchFinishedGoods({ cuttingId: id })
+      setFinishedGoods(goods)
     }
-  
-    };
-    loadData();
-}, [id])
+    loadData()
+  }, [id])
 
   if (!mounted) {
     return (
@@ -131,7 +136,7 @@ export default function CuttingDetailsPage({ params }: Props) {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 border-t border-border/50 pt-5 mt-6">
+          <div className="grid grid-cols-3 gap-3 border-t border-border/50 pt-5 mt-6">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Roll Number</p>
               <p className="text-sm font-bold text-foreground mt-0.5">{entry.rollNo}</p>
@@ -139,6 +144,20 @@ export default function CuttingDetailsPage({ params }: Props) {
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seth Name</p>
               <p className="text-sm font-bold text-foreground mt-0.5">{roll ? roll.sethName : "N/A"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cutter / Master</p>
+              {entry.employeeId ? (
+                <Link
+                  href={`/employees/${entry.employeeId}`}
+                  className="inline-flex items-center gap-1 text-sm font-bold text-[#ea580c] hover:underline mt-0.5"
+                >
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <span>{entry.employeeName || "Worker"}</span>
+                </Link>
+              ) : (
+                <p className="text-sm font-semibold text-muted-foreground mt-0.5">Unassigned</p>
+              )}
             </div>
           </div>
         </div>
@@ -175,9 +194,18 @@ export default function CuttingDetailsPage({ params }: Props) {
               <span>Average per Piece</span>
               <span className="text-foreground font-extrabold text-sm">{entry.average}</span>
             </div>
-            <div className="flex flex-col gap-1 pt-2 border-t border-border/40 col-span-2">
+            <div className="flex flex-col gap-1 pt-2 border-t border-border/40">
               <span>Sort Number</span>
               <span className="text-foreground font-extrabold text-sm">{entry.sortNo}</span>
+            </div>
+            <div className="flex flex-col gap-1 pt-2 border-t border-border/40">
+              <span className="flex items-center gap-1">
+                <UserCheck className="h-3 w-3 text-[#ea580c]" />
+                <span>Assigned Master</span>
+              </span>
+              <span className="text-foreground font-extrabold text-sm">
+                {entry.employeeName ? `${entry.employeeName} (${entry.employeeRole || "Master"})` : "Unassigned"}
+              </span>
             </div>
           </div>
         </section>
@@ -219,22 +247,77 @@ export default function CuttingDetailsPage({ params }: Props) {
           </section>
         )}
 
-        {/* Generated Pieces Section */}
+        {/* Finished Goods & Garment Inventory Section */}
         <section className="flex flex-col gap-3">
-          <h3 className="text-base font-bold text-foreground px-1">Generated Pieces</h3>
-          <div className="flex flex-col gap-2 bg-card p-4 rounded-3xl ring-1 ring-border/60 shadow-sm">
-            {sizeDistribution.map((item, idx) => (
-              <div 
-                key={idx} 
-                className={`flex items-center justify-between py-2 ${idx < sizeDistribution.length - 1 ? 'border-b border-border/40' : ''}`}
-              >
-                <span className="text-xs font-bold text-foreground">{item.size}</span>
-                <span className="text-xs font-black text-primary bg-primary/10 px-3 py-1 rounded-full">
-                  {item.count} Pieces
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-base font-bold text-foreground flex items-center gap-1.5">
+              <Package className="h-4 w-4 text-[#ea580c]" />
+              <span>Finished Goods Garment Batches ({finishedGoods.length})</span>
+            </h3>
+            <Link 
+              href="/inventory"
+              className="text-xs font-bold text-[#ea580c] hover:underline flex items-center gap-1"
+            >
+              <span>Manage in Inventory</span>
+              <span>→</span>
+            </Link>
           </div>
+
+          {finishedGoods.length === 0 ? (
+            <div className="flex flex-col gap-2 bg-card p-4 rounded-3xl ring-1 ring-border/60 shadow-sm text-center py-6">
+              <p className="text-xs text-muted-foreground font-semibold">No finished goods SKU batches logged for this lot yet.</p>
+              <Link 
+                href="/inventory"
+                className="text-xs font-bold text-[#ea580c] hover:underline"
+              >
+                + Initialize Garment SKU in Inventory
+              </Link>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {finishedGoods.map((fg) => (
+                <div 
+                  key={fg.id} 
+                  className="flex flex-col gap-2.5 bg-card p-4 rounded-2xl ring-1 ring-border/60 shadow-xs"
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-bold text-foreground">{fg.itemName} · Size {fg.size}</p>
+                      <p className="text-[10px] text-muted-foreground font-semibold">Shade: {fg.colorShade}</p>
+                    </div>
+                    <span className={`text-[9px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                      fg.status === "Ready" || fg.status === "Dispatched"
+                        ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20"
+                        : fg.status === "In Stitching"
+                        ? "bg-blue-50 text-blue-700 ring-1 ring-blue-600/20"
+                        : "bg-orange-50 text-orange-700 ring-1 ring-orange-600/20"
+                    }`}>
+                      {fg.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 border-t border-border/40 pt-2 text-center text-[10px] font-bold">
+                    <div className="text-left">
+                      <p className="text-muted-foreground uppercase text-[8px]">Total Cut</p>
+                      <p className="text-xs font-extrabold text-foreground">{fg.totalPieces}p</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground uppercase text-[8px]">Stitching</p>
+                      <p className="text-xs font-extrabold text-blue-600">{fg.stitchingPieces}p</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground uppercase text-[8px]">Ready</p>
+                      <p className="text-xs font-extrabold text-emerald-600">{fg.finishedPieces}p</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-muted-foreground uppercase text-[8px]">Dispatched</p>
+                      <p className="text-xs font-extrabold text-purple-600">{fg.dispatchedPieces}p</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Connected Roll Information Card */}
