@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS partners (
 -- 2. Seed Default Partners (Rajubhai & Dhruveshbhai)
 INSERT INTO partners (name, profit_share_percentage, opening_balance, current_balance, status, notes)
 VALUES 
-    ('Rajubhai', 50.00, 100000.00, 100000.00, 'Active', 'Co-Founder & Managing Partner'),
-    ('Dhruveshbhai', 50.00, 100000.00, 100000.00, 'Active', 'Co-Founder & Financial Partner')
+    ('Rajubhai', 50.00, 0.00, 0.00, 'Active', 'Co-Founder & Managing Partner'),
+    ('Dhruveshbhai', 50.00, 0.00, 0.00, 'Active', 'Co-Founder & Financial Partner')
 ON CONFLICT (name) DO UPDATE 
 SET updated_at = CURRENT_TIMESTAMP;
 

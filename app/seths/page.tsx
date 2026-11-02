@@ -267,7 +267,9 @@ export default function SethsPage() {
           <h2 className="text-base font-bold text-foreground px-1">Client Register</h2>
           {filteredSeths.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-3xl bg-card py-12 px-4 text-center ring-1 ring-border/60 shadow-sm">
-              <p className="text-sm text-muted-foreground">No clients found matching &quot;{searchQuery}&quot;</p>
+              <p className="text-sm text-muted-foreground">
+                {searchQuery ? `No clients found matching "${searchQuery}"` : "No clients found."}
+              </p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">

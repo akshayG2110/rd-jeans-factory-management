@@ -14,7 +14,9 @@
     "test:ci": "vitest run --coverage",
     "test:integration": "node scripts/run-all-tests.mjs",
     "test:audit": "node scripts/senior-audit-e2e.mjs",
-    "migrate": "node scripts/run-migration.mjs"
+    "migrate": "node scripts/run-migration.mjs",
+    "db:clean": "node scripts/clean-seed-data.mjs",
+    "db:test:mongo": "node scripts/test-mongo-connection.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -30,6 +32,7 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "lucide-react": "^1.16.0",
+    "mongodb": "^7.8.0",
     "next": "16.2.6",
     "pg": "^8.22.0",
     "react": "^19",
