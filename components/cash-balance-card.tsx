@@ -7,7 +7,7 @@ import { getStoredData } from "@/lib/employee-store"
 
 export function CashBalanceCard() {
   const [mounted, setMounted] = useState(false)
-  const [balance, setBalance] = useState(125000)
+  const [balance, setBalance] = useState(0)
 
   useEffect(() => {
     setMounted(true)

@@ -56,7 +56,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="mt-8 space-y-6">
+        <form onSubmit={handleLogin} className="mt-8 space-y-6" suppressHydrationWarning>
           {error && (
             <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-400">
               {error}
@@ -71,6 +71,8 @@ export default function LoginPage() {
               <input
                 type="text"
                 required
+                autoComplete="username"
+                suppressHydrationWarning
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Enter username"
@@ -85,6 +87,8 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
+                autoComplete="current-password"
+                suppressHydrationWarning
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
@@ -96,6 +100,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
+            suppressHydrationWarning
             className="w-full rounded-2xl bg-black py-4 text-sm font-bold text-white transition-all hover:bg-black/90 active:scale-95 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
           >
             {loading ? "Logging in..." : "Login"}

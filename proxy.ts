@@ -11,7 +11,7 @@ const PUBLIC_API_PATHS = [
   "/api/health"
 ]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // 1. Skip Next.js internal paths and static assets
@@ -118,6 +118,10 @@ export async function middleware(request: NextRequest) {
 
   return NextResponse.next()
 }
+
+// Backward-compatibility alias
+export const middleware = proxy
+export default proxy
 
 // Intercept all routes except static assets
 export const config = {
