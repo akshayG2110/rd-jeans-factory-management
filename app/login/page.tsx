@@ -16,8 +16,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const response = await fetch(`${API_BASE}/auth/login`, {
+      const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -28,18 +27,18 @@ export default function LoginPage() {
       const data = await response.json()
 
       if (response.ok && data.success) {
-        // Store user in localStorage
         localStorage.setItem("rd_user", JSON.stringify(data.user))
-        // Set cookie (user=username)
         document.cookie = `rd_user=${data.user.username}; path=/; max-age=86400`
-        // Redirect to dashboard
+        if (data.user?.token) {
+          document.cookie = `rd_token=${data.user.token}; path=/; max-age=86400`
+        }
         router.push("/")
       } else {
         const detailMsg = typeof data.detail === "string" ? data.detail : data.detail?.message
         setError(detailMsg || data.message || "Invalid username or password")
       }
     } catch (err) {
-      setError("Failed to connect to the backend server. Make sure the backend is running.")
+      setError("Failed to connect to the authentication service.")
     } finally {
       setLoading(false)
     }

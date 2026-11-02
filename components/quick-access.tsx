@@ -12,12 +12,13 @@ export function QuickAccess() {
           const isSeth = mod.name === "Seth"
           const isRollInventory = mod.name === "Roll Inventory"
           const isCutting = mod.name === "Cutting"
+          const isFinishedGoods = mod.name === "Finished Goods"
           const isPartner = mod.name === "Partner"
           const isIncome = mod.name === "Income"
           const isExpense = mod.name === "Expense"
           const isCashBook = mod.name === "Cash Book"
           const isReports = mod.name === "Reports"
-          const Component = (isEmployees || isUpad || isSeth || isRollInventory || isCutting || isPartner || isIncome || isExpense || isCashBook || isReports) ? Link : "button"
+          const Component = (isEmployees || isUpad || isSeth || isRollInventory || isCutting || isFinishedGoods || isPartner || isIncome || isExpense || isCashBook || isReports) ? Link : "button"
           
           let props = {} as any
           if (isEmployees) {
@@ -30,6 +31,8 @@ export function QuickAccess() {
             props = { href: "/rolls" }
           } else if (isCutting) {
             props = { href: "/cutting" }
+          } else if (isFinishedGoods) {
+            props = { href: "/inventory" }
           } else if (isPartner) {
             props = { href: "/partners" }
           } else if (isIncome) {

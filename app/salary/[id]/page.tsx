@@ -50,6 +50,7 @@ export default function SalaryDetailsPage({ params }: Props) {
   const [editMonth, setEditMonth] = useState("May")
   const [editYear, setEditYear] = useState("2026")
   const [editNotes, setEditNotes] = useState("")
+  const [settledUpads, setSettledUpads] = useState<any[]>([])
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -57,7 +58,32 @@ export default function SalaryDetailsPage({ params }: Props) {
     setTransactions(data.transactions || [])
     setSalaryRecords(data.salaryRecords || [])
 
-    const rec = (data.salaryRecords || []).find((r) => r.id === id)
+    let rec = (data.salaryRecords || []).find((r) => r.id === id)
+
+    try {
+      const res = await fetch(`/api/salary/${id}`)
+      if (res.ok) {
+        const json = await res.json()
+        if (json.success && json.data) {
+          const apiRec = json.data
+          setSettledUpads(apiRec.settled_upads || [])
+          if (rec) {
+            rec = {
+              ...rec,
+              salaryAmount: parseFloat(apiRec.salary_amount || rec.salaryAmount),
+              totalUpadDeducted: parseFloat(apiRec.total_upad_deducted || '0'),
+              netPayable: parseFloat(apiRec.net_payable ?? apiRec.salary_amount),
+              paidAmount: parseFloat(apiRec.paid_amount || rec.paidAmount),
+              remainingAmount: parseFloat(apiRec.remaining_amount || rec.remainingAmount),
+              settledUpads: apiRec.settled_upads || []
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching salary details:", e)
+    }
+
     if (rec) {
       setRecord(rec)
       setPayAmount(rec.remainingAmount.toString())
@@ -186,22 +212,32 @@ export default function SalaryDetailsPage({ params }: Props) {
 
           <div className="grid grid-cols-2 gap-4 border-t border-border/50 pt-5 mt-6">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Salary Month</p>
-              <p className="text-sm font-bold text-foreground mt-0.5">{record.month} {record.year}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Gross Salary</p>
+              <p className="text-sm font-bold text-foreground mt-0.5">₹{record.salaryAmount.toLocaleString("en-IN")}</p>
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Salary Amount</p>
-              <p className="text-sm font-bold text-foreground mt-0.5">₹{record.salaryAmount.toLocaleString("en-IN")}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Upad Advance Deducted</p>
+              <p className="text-sm font-bold text-[#ea580c] mt-0.5">
+                {record.totalUpadDeducted && record.totalUpadDeducted > 0
+                  ? `-₹${record.totalUpadDeducted.toLocaleString("en-IN")}`
+                  : "₹0 (No Advance)"}
+              </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 border-t border-border/50 pt-5 mt-4">
+          <div className="grid grid-cols-3 gap-3 border-t border-border/50 pt-5 mt-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Net Payable</p>
+              <p className="text-sm font-bold text-foreground mt-0.5">
+                ₹{(record.netPayable ?? record.salaryAmount).toLocaleString("en-IN")}
+              </p>
+            </div>
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Paid Amount</p>
               <p className="text-sm font-bold text-emerald-600 mt-0.5">₹{record.paidAmount.toLocaleString("en-IN")}</p>
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Remaining Amount</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Remaining</p>
               <p className="text-sm font-bold text-red-600 mt-0.5">₹{record.remainingAmount.toLocaleString("en-IN")}</p>
             </div>
           </div>
@@ -215,6 +251,33 @@ export default function SalaryDetailsPage({ params }: Props) {
             </div>
           )}
         </div>
+
+        {/* Settled Advances Section (Upad Deduction Audit) */}
+        {settledUpads.length > 0 && (
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-bold text-foreground px-1 flex items-center justify-between">
+              <span>Settled Advances (Upad Deduction Audit)</span>
+              <span className="text-[11px] font-bold text-[#ea580c]">{settledUpads.length} advance(s) deducted</span>
+            </h3>
+            <div className="flex flex-col gap-2 rounded-2xl bg-card p-4 ring-1 ring-border/60 shadow-xs">
+              {settledUpads.map((upad) => (
+                <div key={upad.id} className="flex items-center justify-between border-b border-border/40 pb-2.5 pt-1 last:border-b-0 last:pb-0">
+                  <div>
+                    <p className="text-xs font-bold text-foreground">
+                      Advance #{upad.id} — {upad.date ? upad.date.split("T")[0] : ""}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {upad.payment_method} • Handled by {upad.handled_by} {upad.notes ? `• ${upad.notes}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-[#ea580c]">
+                    -₹{parseFloat(upad.amount).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Action Buttons Section */}
         <section className="grid grid-cols-3 gap-2.5">

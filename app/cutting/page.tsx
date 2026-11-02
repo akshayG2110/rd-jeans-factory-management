@@ -16,20 +16,24 @@ import {
   Eye, 
   TrendingUp, 
   TrendingDown, 
-  AlertCircle 
+  AlertCircle,
+  UserCheck,
+  User
 } from "lucide-react"
-import { getStoredData, createCutting, updateCutting, getRecentMonthsOptions, type CuttingEntry, type CuttingHistoryLog, type FabricReceive } from "@/lib/employee-store"
+import { getStoredData, createCutting, updateCutting, getRecentMonthsOptions, type CuttingEntry, type CuttingHistoryLog, type FabricReceive, type Employee } from "@/lib/employee-store"
 
 export default function CuttingPage() {
   const [mounted, setMounted] = useState(false)
   const [cuttings, setCuttings] = useState<CuttingEntry[]>([])
   const [cuttingLogs, setCuttingLogs] = useState<CuttingHistoryLog[]>([])
   const [fabricReceives, setFabricReceives] = useState<FabricReceive[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
 
   // Search & Filters
   const [searchLot, setSearchLot] = useState("")
   const [searchRoll, setSearchRoll] = useState("")
   const [selectedMonth, setSelectedMonth] = useState("All")
+  const [selectedWorker, setSelectedWorker] = useState("All")
 
   // Dialog State
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -40,6 +44,7 @@ export default function CuttingPage() {
   const [formDate, setFormDate] = useState("")
   const [formLotNo, setFormLotNo] = useState("")
   const [formRollId, setFormRollId] = useState("")
+  const [formEmployeeId, setFormEmployeeId] = useState("")
   const [formMeterUsed, setFormMeterUsed] = useState("")
   const [formPieces, setFormPieces] = useState("")
   const [formSize, setFormSize] = useState("28+36")
@@ -55,6 +60,7 @@ export default function CuttingPage() {
     setCuttings(data.cuttings || [])
     setCuttingLogs(data.cuttingHistoryLogs || [])
     setFabricReceives(data.fabricReceives || [])
+    setEmployees(data.employees || [])
   }
 
   useEffect(() => {
@@ -74,6 +80,7 @@ export default function CuttingPage() {
     setDialogMode("add")
     setEditingEntryId(null)
     setFormLotNo(Math.floor(200 + Math.random() * 800).toString())
+    setFormEmployeeId("")
     setFormMeterUsed("")
     setFormPieces("")
     setFormNotes("")
@@ -92,6 +99,7 @@ export default function CuttingPage() {
     setEditingEntryId(entry.id)
     setFormLotNo(entry.lotNo)
     setFormRollId(entry.rollId)
+    setFormEmployeeId(entry.employeeId || "")
     setFormMeterUsed(entry.meterUsed.toString())
     setFormPieces(entry.pieces.toString())
     setFormSize(entry.size)
@@ -121,6 +129,7 @@ export default function CuttingPage() {
         date: formDate,
         rollId: formRollId,
         rollNo: selectedRoll.rollNo,
+        employeeId: formEmployeeId || undefined,
         meterUsed: metersUsedNum,
         pieces: piecesNum,
         size: formSize,
@@ -135,6 +144,7 @@ export default function CuttingPage() {
         lotNo: formLotNo.trim(),
         rollId: formRollId,
         rollNo: selectedRoll.rollNo,
+        employeeId: formEmployeeId || undefined,
         meterUsed: metersUsedNum,
         pieces: piecesNum,
         size: formSize,
@@ -172,7 +182,12 @@ export default function CuttingPage() {
       matchesMonth = (cut.date || "").includes(`-0${selectedMonth}`) || (cut.date || "").includes(`-${selectedMonth}`)
     }
 
-    return matchesLot && matchesRoll && matchesMonth
+    let matchesWorker = true
+    if (selectedWorker !== "All") {
+      matchesWorker = cut.employeeId === selectedWorker
+    }
+
+    return matchesLot && matchesRoll && matchesMonth && matchesWorker
   })
 
   // Recent Activity Items List (combining events)
@@ -288,7 +303,7 @@ export default function CuttingPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-2 gap-3">
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -297,6 +312,17 @@ export default function CuttingPage() {
               <option value="All">All Months</option>
               {getRecentMonthsOptions(6).map((opt) => (
                 <option key={opt.key} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedWorker}
+              onChange={(e) => setSelectedWorker(e.target.value)}
+              className="w-full rounded-xl border-0 bg-secondary px-3 py-2.5 text-xs text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-bold"
+            >
+              <option value="All">All Workers / Masters</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
               ))}
             </select>
           </div>
@@ -323,6 +349,17 @@ export default function CuttingPage() {
                         <Calendar className="h-3 w-3" />
                         <span>{new Date(cut.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
                       </p>
+                      <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950 text-[#ea580c]">
+                          <UserCheck className="h-3 w-3" />
+                        </span>
+                        <span>
+                          Cutter: <strong className="text-foreground">{cut.employeeName || "Unassigned"}</strong>
+                          {cut.employeeRole && (
+                            <span className="text-[10px] text-muted-foreground ml-1">({cut.employeeRole})</span>
+                          )}
+                        </span>
+                      </div>
                     </div>
 
                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[9px] font-bold ${
@@ -509,16 +546,35 @@ export default function CuttingPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-muted-foreground">Meter Used</label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="e.g. 150"
-                    value={formMeterUsed}
-                    onChange={(e) => setFormMeterUsed(e.target.value)}
-                    className="rounded-xl border-0 bg-secondary px-4 py-3 text-sm text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-semibold"
-                  />
+                  <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+                    <UserCheck className="h-3.5 w-3.5 text-[#ea580c]" />
+                    <span>Cutter Worker / Master</span>
+                  </label>
+                  <select
+                    value={formEmployeeId}
+                    onChange={(e) => setFormEmployeeId(e.target.value)}
+                    className="rounded-xl border-0 bg-secondary px-4 py-3 text-xs text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-semibold"
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {employees.filter(e => e.status === "active").map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.role})
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-muted-foreground">Meter Used</label>
+                <input
+                  type="number"
+                  required
+                  placeholder="e.g. 150"
+                  value={formMeterUsed}
+                  onChange={(e) => setFormMeterUsed(e.target.value)}
+                  className="rounded-xl border-0 bg-secondary px-4 py-3 text-sm text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-semibold"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

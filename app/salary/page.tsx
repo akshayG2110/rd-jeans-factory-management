@@ -56,12 +56,36 @@ export default function SalaryPage() {
   const [formNotes, setFormNotes] = useState("")
   const [formHandledBy, setFormHandledBy] = useState<string>("")
   const [formPaymentMethod, setFormPaymentMethod] = useState<string>("Cash")
+  const [pendingUpadTotal, setPendingUpadTotal] = useState(0)
+  const [pendingUpadCount, setPendingUpadCount] = useState(0)
+  const [deductUpad, setDeductUpad] = useState(true)
 
   const loadData = async () => {
     const data = await getStoredData()
     setEmployees(data.employees || [])
     setTransactions(data.transactions || [])
     setSalaryRecords(data.salaryRecords || [])
+  }
+
+  const checkPendingUpads = async (empId: string, month: string, year: string, grossSal?: number) => {
+    if (!empId) return
+    const mNum = MONTHS.indexOf(month) + 1
+    try {
+      const res = await fetch(`/api/upad/employee/${empId}/summary?month=${mNum}&year=${year}`)
+      if (res.ok) {
+        const data = await res.json()
+        const unTotal = data.unsettled_upad || 0
+        const unCount = (data.unsettled_upad_records || []).length
+        setPendingUpadTotal(unTotal)
+        setPendingUpadCount(unCount)
+
+        const gross = grossSal !== undefined ? grossSal : parseFloat(formSalaryAmount || "0")
+        const net = Math.max(0, gross - (deductUpad ? unTotal : 0))
+        setFormPaidAmount(net.toString())
+      }
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   useEffect(() => {
@@ -71,29 +95,38 @@ export default function SalaryPage() {
 
   useEffect(() => {
     if (employees.length > 0 && !formEmployeeId) {
-      setFormEmployeeId(employees[0].id)
-      setFormSalaryAmount(employees[0].salary.toString())
-      setFormPaidAmount(employees[0].salary.toString())
+      const firstEmp = employees[0]
+      setFormEmployeeId(firstEmp.id)
+      setFormSalaryAmount(firstEmp.salary.toString())
+      checkPendingUpads(firstEmp.id, formMonth, formYear, firstEmp.salary)
     }
   }, [employees])
 
   const handleEmployeeChange = (empId: string) => {
     setFormEmployeeId(empId)
     const emp = employees.find((e) => e.id === empId)
-    if (emp) {
-      setFormSalaryAmount(emp.salary.toString())
-      setFormPaidAmount(emp.salary.toString())
+    const sal = emp ? emp.salary : 0
+    setFormSalaryAmount(sal.toString())
+    checkPendingUpads(empId, formMonth, formYear, sal)
+  }
+
+  const handleMonthChange = (newMonth: string) => {
+    setFormMonth(newMonth)
+    if (dialogMode === "add" && formEmployeeId) {
+      checkPendingUpads(formEmployeeId, newMonth, formYear)
+    }
+  }
+
+  const handleYearChange = (newYear: string) => {
+    setFormYear(newYear)
+    if (dialogMode === "add" && formEmployeeId) {
+      checkPendingUpads(formEmployeeId, formMonth, newYear)
     }
   }
 
   const handleOpenAddDialog = () => {
     setDialogMode("add")
     setEditingRecordId(null)
-    if (employees.length > 0) {
-      setFormEmployeeId(employees[0].id)
-      setFormSalaryAmount(employees[0].salary.toString())
-      setFormPaidAmount(employees[0].salary.toString())
-    }
     const curDate = new Date()
     const curMonthNum = curDate.getMonth() + 1
     const curYear = curDate.getFullYear()
@@ -103,6 +136,14 @@ export default function SalaryPage() {
     setFormNotes("")
     setFormHandledBy("")
     setFormPaymentMethod("Cash")
+    setDeductUpad(true)
+
+    if (employees.length > 0) {
+      const firstEmp = employees[0]
+      setFormEmployeeId(firstEmp.id)
+      setFormSalaryAmount(firstEmp.salary.toString())
+      checkPendingUpads(firstEmp.id, curMonthName, String(curYear), firstEmp.salary)
+    }
     setIsDialogOpen(true)
   }
 
@@ -119,6 +160,8 @@ export default function SalaryPage() {
     setFormNotes(record.notes)
     setFormHandledBy(record.handledBy || "Rajubhai")
     setFormPaymentMethod(record.paymentMethod || "Cash")
+    setPendingUpadTotal(record.totalUpadDeducted || 0)
+    setPendingUpadCount(0)
     setIsDialogOpen(true)
   }
 
@@ -146,7 +189,8 @@ export default function SalaryPage() {
         notes: formNotes || `${formMonth} ${formYear} salary entry`,
         date: new Date().toISOString().split("T")[0],
         paymentMethod: formPaymentMethod,
-        handledBy: formHandledBy
+        handledBy: formHandledBy,
+        deductUpad
       })
     } else if (dialogMode === "edit" && editingRecordId) {
       await updateSalary(editingRecordId, {
@@ -346,7 +390,7 @@ export default function SalaryPage() {
 
                   <div className="grid grid-cols-3 gap-2 border-t border-border/50 pt-3">
                     <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase">Salary</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase">Gross</p>
                       <p className="text-xs font-bold text-foreground mt-0.5">₹{(rec.salaryAmount || 0).toLocaleString("en-IN")}</p>
                     </div>
                     <div>
@@ -358,6 +402,13 @@ export default function SalaryPage() {
                       <p className="text-xs font-bold text-[#ea580c] mt-0.5 text-right">₹{(rec.remainingAmount || 0).toLocaleString("en-IN")}</p>
                     </div>
                   </div>
+
+                  {rec.totalUpadDeducted && rec.totalUpadDeducted > 0 ? (
+                    <div className="flex items-center justify-between rounded-xl bg-orange-500/10 px-3 py-1.5 text-[11px] font-bold text-orange-700 dark:text-orange-400">
+                      <span>Upad Advance Deducted:</span>
+                      <span>-₹{rec.totalUpadDeducted.toLocaleString("en-IN")}</span>
+                    </div>
+                  ) : null}
 
                   <div className="flex items-center gap-2 border-t border-border/50 pt-3.5">
                     <Link
@@ -463,7 +514,7 @@ export default function SalaryPage() {
                   <label className="text-xs font-bold text-muted-foreground">Salary Month</label>
                   <select
                     value={formMonth}
-                    onChange={(e) => setFormMonth(e.target.value)}
+                    onChange={(e) => handleMonthChange(e.target.value)}
                     className="rounded-xl border-0 bg-secondary px-4 py-3 text-xs text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-semibold"
                   >
                     {MONTHS.map((m) => (
@@ -476,7 +527,7 @@ export default function SalaryPage() {
                   <label className="text-xs font-bold text-muted-foreground">Salary Year</label>
                   <select
                     value={formYear}
-                    onChange={(e) => setFormYear(e.target.value)}
+                    onChange={(e) => handleYearChange(e.target.value)}
                     className="rounded-xl border-0 bg-secondary px-4 py-3 text-xs text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none font-semibold"
                   >
                     {YEARS.map((y) => (
@@ -487,16 +538,54 @@ export default function SalaryPage() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-muted-foreground">Salary Amount (₹)</label>
+                <label className="text-xs font-bold text-muted-foreground">Gross Salary Amount (₹)</label>
                 <input
                   type="number"
                   required
                   placeholder="e.g. 18000"
                   value={formSalaryAmount}
-                  onChange={(e) => setFormSalaryAmount(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setFormSalaryAmount(val)
+                    const gross = parseFloat(val || "0")
+                    const deduction = deductUpad ? pendingUpadTotal : 0
+                    setFormPaidAmount(Math.max(0, gross - deduction).toString())
+                  }}
                   className="rounded-xl border-0 bg-secondary px-4 py-3 text-sm text-foreground ring-1 ring-border/20 focus:ring-2 focus:ring-primary focus:outline-none"
                 />
               </div>
+
+              {/* Upad Advance Detection & Auto-Deduction Banner */}
+              {dialogMode === "add" && pendingUpadTotal > 0 && (
+                <div className="rounded-2xl bg-orange-500/10 p-3.5 ring-1 ring-orange-500/30 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-orange-700 dark:text-orange-400">
+                      Pending Upad Advance: ₹{pendingUpadTotal.toLocaleString("en-IN")}
+                    </span>
+                    <span className="text-[10px] font-semibold text-muted-foreground">
+                      {pendingUpadCount} advance(s)
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-foreground cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={deductUpad}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setDeductUpad(checked)
+                        const gross = parseFloat(formSalaryAmount || "0")
+                        const deduction = checked ? pendingUpadTotal : 0
+                        setFormPaidAmount(Math.max(0, gross - deduction).toString())
+                      }}
+                      className="rounded border-border text-primary focus:ring-primary"
+                    />
+                    <span>Auto-deduct from this salary payout</span>
+                  </label>
+                  <p className="text-[11px] font-bold text-foreground/80 border-t border-orange-500/20 pt-1.5 mt-0.5">
+                    Net Payable: ₹{Math.max(0, parseFloat(formSalaryAmount || "0") - (deductUpad ? pendingUpadTotal : 0)).toLocaleString("en-IN")}
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold text-muted-foreground">Paid Amount (₹)</label>

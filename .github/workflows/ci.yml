@@ -1,0 +1,38 @@
+name: RD Jeans CI Quality Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-and-audit:
+    name: Run Unit Tests & Coverage Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Typecheck Compilation
+        run: npx tsc --noEmit
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Run Coverage & Quality Gates
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+          SECRET_KEY: test_secret_key_for_vitest_unit_testing_minimum_32_characters
+          JWT_SECRET: test_secret_key_for_vitest_unit_testing_minimum_32_characters

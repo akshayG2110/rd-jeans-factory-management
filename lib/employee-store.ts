@@ -12,6 +12,9 @@ export interface Transaction {
   paymentMethod?: string
   notes?: string
   handledBy?: string
+  status?: "Pending" | "Settled" | "Cancelled"
+  settledInSalaryId?: string | null
+  settledAt?: string | null
 }
 
 export interface Employee {
@@ -38,6 +41,8 @@ export interface SalaryRecord {
   month: string
   year: string
   salaryAmount: number
+  totalUpadDeducted?: number
+  netPayable?: number
   paidAmount: number
   remainingAmount: number
   status: "Paid" | "Partially Paid" | "Pending"
@@ -45,6 +50,8 @@ export interface SalaryRecord {
   date: string
   paymentMethod?: string
   handledBy?: string
+  settledUpadIds?: number[]
+  settledUpads?: any[]
 }
 
 export interface Seth {
@@ -126,6 +133,9 @@ export interface CuttingEntry {
   date: string
   rollId: string
   rollNo: string
+  employeeId?: string
+  employeeName?: string
+  employeeRole?: string
   meterUsed: number
   pieces: number
   size: string
@@ -146,24 +156,56 @@ export interface CuttingHistoryLog {
   remarks: string
 }
 
+export interface FinishedGoodsItem {
+  id: string
+  cuttingId: string
+  sethId?: string
+  sethName?: string
+  lotNumber: string
+  itemName: string
+  size: string
+  colorShade: string
+  totalPieces: number
+  stitchingPieces: number
+  finishedPieces: number
+  rejectedPieces: number
+  dispatchedPieces: number
+  status: "Cut" | "In Stitching" | "Washing" | "Ready" | "Dispatched" | "Closed"
+  unitPrice: number
+  dispatchDate?: string
+  notes?: string
+  createdAt: string
+  rollNumber?: string
+  fabricType?: string
+  cutterName?: string
+}
+
 export interface PartnerAccount {
   id: string
   name: string
+  mobileNumber?: string
+  profitSharePercentage?: number
   openingBalance: number
   currentBalance: number
   totalInvestment: number
   totalWithdrawal: number
   additionalContributions: number
   adjustments: number
+  status?: "Active" | "Inactive"
+  notes?: string
+  cashInHandled?: number
+  cashOutHandled?: number
+  netCashHandled?: number
 }
 
 export interface PartnerTransaction {
   id: string
   partnerId: string
   partnerName: string
-  type: "Investment" | "Additional Contribution" | "Withdrawal" | "Adjustment"
+  type: "Capital Investment" | "Drawing (Personal Withdrawal)" | "Profit Share" | "Cash Transfer" | "Adjustment" | "Investment" | "Withdrawal"
   date: string
   amount: number
+  paymentMethod?: string
   notes: string
 }
 
@@ -261,7 +303,8 @@ let FALLBACK_STORE = {
   incomeHistoryLogs: [] as IncomeHistoryLog[],
   expenses: [] as ExpenseRecord[],
   expenseHistoryLogs: [] as ExpenseHistoryLog[],
-  cashBook: [] as CashBookRecord[]
+  cashBook: [] as CashBookRecord[],
+  finishedGoods: [] as FinishedGoodsItem[]
 }
 
 // ----------------------------------------------------
@@ -365,7 +408,10 @@ export async function fetchUpads(employeeId?: string): Promise<Transaction[]> {
         description: u.notes || "Advance Payment",
         paymentMethod: u.payment_method,
         notes: u.notes,
-        handledBy: u.handled_by
+        handledBy: u.handled_by,
+        status: (u.status || "Pending") as "Pending" | "Settled" | "Cancelled",
+        settledInSalaryId: u.settled_in_salary_id ? String(u.settled_in_salary_id) : null,
+        settledAt: u.settled_at || null
       }))
     }
   } catch (err) {
@@ -403,7 +449,10 @@ export async function createUpad(upad: Partial<Transaction>): Promise<Transactio
         description: body.data.notes || "Advance Payment",
         paymentMethod: body.data.payment_method,
         notes: body.data.notes,
-        handledBy: body.data.handled_by
+        handledBy: body.data.handled_by,
+        status: (body.data.status || "Pending") as "Pending" | "Settled" | "Cancelled",
+        settledInSalaryId: body.data.settled_in_salary_id ? String(body.data.settled_in_salary_id) : null,
+        settledAt: body.data.settled_at || null
       }
     }
   } catch (err: any) {
@@ -427,13 +476,16 @@ export async function fetchSalaries(employeeId?: string): Promise<SalaryRecord[]
         month: MONTH_REV[s.salary_month] || "June",
         year: String(s.salary_year),
         salaryAmount: parseFloat(s.salary_amount),
+        totalUpadDeducted: parseFloat(s.total_upad_deducted || 0),
+        netPayable: parseFloat(s.net_payable ?? s.salary_amount),
         paidAmount: parseFloat(s.paid_amount),
         remainingAmount: parseFloat(s.remaining_amount),
-        status: s.remaining_amount <= 0 ? "Paid" as const : s.paid_amount > 0 ? "Partially Paid" as const : "Pending" as const,
+        status: s.remaining_amount <= 0 ? ("Paid" as const) : s.paid_amount > 0 ? ("Partially Paid" as const) : ("Pending" as const),
         notes: s.notes || "",
         date: s.payment_date,
         paymentMethod: s.payment_method,
-        handledBy: s.handled_by
+        handledBy: s.handled_by,
+        settledUpadIds: s.settled_upad_ids || []
       }))
     }
   } catch (err) {
@@ -442,7 +494,7 @@ export async function fetchSalaries(employeeId?: string): Promise<SalaryRecord[]
   return FALLBACK_STORE.salaryRecords
 }
 
-export async function createSalary(sal: Partial<SalaryRecord>): Promise<SalaryRecord | null> {
+export async function createSalary(sal: Partial<SalaryRecord> & { deductUpad?: boolean; upadIds?: number[] }): Promise<SalaryRecord | null> {
   try {
     const payload = {
       employee_id: parseInt(sal.employeeId || "0"),
@@ -453,7 +505,9 @@ export async function createSalary(sal: Partial<SalaryRecord>): Promise<SalaryRe
       payment_method: sal.paymentMethod || "Cash",
       notes: sal.notes || "",
       handled_by: sal.handledBy,
-      payment_date: sal.date || new Date().toISOString().split("T")[0]
+      payment_date: sal.date || new Date().toISOString().split("T")[0],
+      deduct_upad: sal.deductUpad !== undefined ? sal.deductUpad : true,
+      upad_ids: sal.upadIds
     }
     const res = await apiFetch(`${API_BASE}/salary`, {
       method: "POST",
@@ -470,17 +524,21 @@ export async function createSalary(sal: Partial<SalaryRecord>): Promise<SalaryRe
         month: MONTH_REV[body.data.salary_month] || "June",
         year: String(body.data.salary_year),
         salaryAmount: parseFloat(body.data.salary_amount),
+        totalUpadDeducted: parseFloat(body.data.total_upad_deducted || 0),
+        netPayable: parseFloat(body.data.net_payable ?? body.data.salary_amount),
         paidAmount: parseFloat(body.data.paid_amount),
         remainingAmount: parseFloat(body.data.remaining_amount),
-        status: body.data.remaining_amount <= 0 ? "Paid" as const : body.data.paid_amount > 0 ? "Partially Paid" as const : "Pending" as const,
+        status: body.data.remaining_amount <= 0 ? ("Paid" as const) : body.data.paid_amount > 0 ? ("Partially Paid" as const) : ("Pending" as const),
         notes: body.data.notes || "",
         date: body.data.payment_date,
         paymentMethod: body.data.payment_method,
-        handledBy: body.data.handled_by
+        handledBy: body.data.handled_by,
+        settledUpadIds: body.data.settled_upad_ids || []
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error("createSalary failed", err)
+    throw err
   }
   return null
 }
@@ -978,7 +1036,10 @@ export async function fetchCuttings(): Promise<CuttingEntry[]> {
         lotNo: c.lot_number,
         date: c.cutting_date,
         rollId: String(c.roll_id),
-        rollNo: c.roll ? c.roll.roll_number : "Roll ID",
+        rollNo: c.roll ? c.roll.roll_number : (c.roll_number || "Roll ID"),
+        employeeId: c.employee_id ? String(c.employee_id) : undefined,
+        employeeName: c.employee_name || undefined,
+        employeeRole: c.employee_role || undefined,
         meterUsed: parseFloat(c.meter_used),
         pieces: c.piece_count,
         size: c.size,
@@ -1002,6 +1063,7 @@ export async function createCutting(c: Partial<CuttingEntry>): Promise<CuttingEn
       cutting_date: c.date || new Date().toISOString().split("T")[0],
       lot_number: c.lotNo,
       roll_id: parseInt(c.rollId || "0"),
+      employee_id: c.employeeId ? parseInt(c.employeeId, 10) : null,
       meter_used: c.meterUsed,
       layer_information: c.layerInfo || "",
       piece_count: c.pieces,
@@ -1023,7 +1085,10 @@ export async function createCutting(c: Partial<CuttingEntry>): Promise<CuttingEn
         lotNo: body.data.lot_number,
         date: body.data.cutting_date,
         rollId: String(body.data.roll_id),
-        rollNo: c.rollNo || "Roll ID",
+        rollNo: c.rollNo || body.data.roll_number || "Roll ID",
+        employeeId: body.data.employee_id ? String(body.data.employee_id) : undefined,
+        employeeName: body.data.employee_name || undefined,
+        employeeRole: body.data.employee_role || undefined,
         meterUsed: parseFloat(body.data.meter_used),
         pieces: body.data.piece_count,
         size: body.data.size,
@@ -1047,6 +1112,7 @@ export async function updateCutting(cutId: string, c: Partial<CuttingEntry>): Pr
       cutting_date: c.date,
       lot_number: c.lotNo,
       roll_id: c.rollId ? parseInt(c.rollId) : undefined,
+      employee_id: c.employeeId !== undefined ? (c.employeeId ? parseInt(c.employeeId, 10) : null) : undefined,
       meter_used: c.meterUsed,
       layer_information: c.layerInfo,
       piece_count: c.pieces,
@@ -1068,7 +1134,10 @@ export async function updateCutting(cutId: string, c: Partial<CuttingEntry>): Pr
         lotNo: body.data.lot_number,
         date: body.data.cutting_date,
         rollId: String(body.data.roll_id),
-        rollNo: c.rollNo || "Roll ID",
+        rollNo: c.rollNo || body.data.roll_number || "Roll ID",
+        employeeId: body.data.employee_id ? String(body.data.employee_id) : undefined,
+        employeeName: body.data.employee_name || undefined,
+        employeeRole: body.data.employee_role || undefined,
         meterUsed: parseFloat(body.data.meter_used),
         pieces: body.data.piece_count,
         size: body.data.size,
@@ -1086,39 +1155,386 @@ export async function updateCutting(cutId: string, c: Partial<CuttingEntry>): Pr
   return null
 }
 
+export async function fetchFinishedGoods(filters?: { cuttingId?: string; sethId?: string; status?: string; search?: string }): Promise<FinishedGoodsItem[]> {
+  try {
+    const params = new URLSearchParams()
+    if (filters?.cuttingId) params.append('cutting_id', filters.cuttingId)
+    if (filters?.sethId) params.append('seth_id', filters.sethId)
+    if (filters?.status) params.append('status', filters.status)
+    if (filters?.search) params.append('search', filters.search)
+
+    const url = `${API_BASE}/finished-goods${params.toString() ? '?' + params.toString() : ''}`
+    const res = await apiFetch(url)
+    const body = await res.json()
+    if (body.success && body.data) {
+      return body.data.map((item: any) => ({
+        id: String(item.id),
+        cuttingId: String(item.cutting_id),
+        sethId: item.seth_id ? String(item.seth_id) : undefined,
+        sethName: item.seth_name || undefined,
+        lotNumber: item.lot_number,
+        itemName: item.item_name,
+        size: item.size,
+        colorShade: item.color_shade,
+        totalPieces: item.total_pieces,
+        stitchingPieces: item.stitching_pieces,
+        finishedPieces: item.finished_pieces,
+        rejectedPieces: item.rejected_pieces,
+        dispatchedPieces: item.dispatched_pieces,
+        status: item.status,
+        unitPrice: parseFloat(item.unit_price || '0'),
+        dispatchDate: item.dispatch_date || undefined,
+        notes: item.notes || undefined,
+        createdAt: item.created_at,
+        rollNumber: item.roll_number,
+        fabricType: item.fabric_type,
+        cutterName: item.cutter_name
+      }))
+    }
+  } catch (err) {
+    console.error("fetchFinishedGoods failed", err)
+  }
+  return FALLBACK_STORE.finishedGoods || []
+}
+
+export async function createFinishedGoodsItem(item: Partial<FinishedGoodsItem>): Promise<FinishedGoodsItem | null> {
+  try {
+    const payload = {
+      cutting_id: parseInt(item.cuttingId || '0', 10),
+      seth_id: item.sethId ? parseInt(item.sethId, 10) : null,
+      lot_number: item.lotNumber,
+      item_name: item.itemName,
+      size: item.size,
+      color_shade: item.colorShade,
+      total_pieces: item.totalPieces,
+      stitching_pieces: item.stitchingPieces,
+      finished_pieces: item.finishedPieces,
+      rejected_pieces: item.rejectedPieces,
+      dispatched_pieces: item.dispatchedPieces,
+      status: item.status,
+      unit_price: item.unitPrice,
+      dispatch_date: item.dispatchDate,
+      notes: item.notes
+    }
+    const res = await apiFetch(`${API_BASE}/finished-goods`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = await res.json()
+    if (body.success && body.data) {
+      const rec = body.data
+      return {
+        id: String(rec.id),
+        cuttingId: String(rec.cutting_id),
+        sethId: rec.seth_id ? String(rec.seth_id) : undefined,
+        sethName: rec.seth_name,
+        lotNumber: rec.lot_number,
+        itemName: rec.item_name,
+        size: rec.size,
+        colorShade: rec.color_shade,
+        totalPieces: rec.total_pieces,
+        stitchingPieces: rec.stitching_pieces,
+        finishedPieces: rec.finished_pieces,
+        rejectedPieces: rec.rejected_pieces,
+        dispatchedPieces: rec.dispatched_pieces,
+        status: rec.status,
+        unitPrice: parseFloat(rec.unit_price || '0'),
+        dispatchDate: rec.dispatch_date,
+        notes: rec.notes,
+        createdAt: rec.created_at,
+        rollNumber: rec.roll_number,
+        fabricType: rec.fabric_type,
+        cutterName: rec.cutter_name
+      }
+    }
+  } catch (err) {
+    console.error("createFinishedGoodsItem failed", err)
+  }
+  return null
+}
+
+export async function updateFinishedGoodsItem(id: string, item: Partial<FinishedGoodsItem>): Promise<FinishedGoodsItem | null> {
+  try {
+    const payload = {
+      seth_id: item.sethId ? parseInt(item.sethId, 10) : undefined,
+      item_name: item.itemName,
+      size: item.size,
+      color_shade: item.colorShade,
+      total_pieces: item.totalPieces,
+      stitching_pieces: item.stitchingPieces,
+      finished_pieces: item.finishedPieces,
+      rejected_pieces: item.rejectedPieces,
+      dispatched_pieces: item.dispatchedPieces,
+      status: item.status,
+      unit_price: item.unitPrice,
+      dispatch_date: item.dispatchDate,
+      notes: item.notes
+    }
+    const res = await apiFetch(`${API_BASE}/finished-goods/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = await res.json()
+    if (body.success && body.data) {
+      const rec = body.data
+      return {
+        id: String(rec.id),
+        cuttingId: String(rec.cutting_id),
+        sethId: rec.seth_id ? String(rec.seth_id) : undefined,
+        sethName: rec.seth_name,
+        lotNumber: rec.lot_number,
+        itemName: rec.item_name,
+        size: rec.size,
+        colorShade: rec.color_shade,
+        totalPieces: rec.total_pieces,
+        stitchingPieces: rec.stitching_pieces,
+        finishedPieces: rec.finished_pieces,
+        rejectedPieces: rec.rejected_pieces,
+        dispatchedPieces: rec.dispatched_pieces,
+        status: rec.status,
+        unitPrice: parseFloat(rec.unit_price || '0'),
+        dispatchDate: rec.dispatch_date,
+        notes: rec.notes,
+        createdAt: rec.created_at,
+        rollNumber: rec.roll_number,
+        fabricType: rec.fabric_type,
+        cutterName: rec.cutter_name
+      }
+    }
+  } catch (err) {
+    console.error("updateFinishedGoodsItem failed", err)
+  }
+  return null
+}
+
+export async function deleteFinishedGoodsItem(id: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(`${API_BASE}/finished-goods/${id}`, { method: "DELETE" })
+    const body = await res.json()
+    return body.success === true
+  } catch (err) {
+    console.error("deleteFinishedGoodsItem failed", err)
+    return false
+  }
+}
+
+export async function fetchFinishedGoodsSummary(): Promise<any> {
+  try {
+    const res = await apiFetch(`${API_BASE}/finished-goods/summary`)
+    const body = await res.json()
+    if (body.success && body.data) {
+      return body.data
+    }
+  } catch (err) {
+    console.error("fetchFinishedGoodsSummary failed", err)
+  }
+  return {
+    totalCut: 0,
+    totalInStitching: 0,
+    totalReady: 0,
+    totalDispatched: 0,
+    totalRejected: 0,
+    totalBatches: 0
+  }
+}
+
+export async function fetchPartners(): Promise<PartnerAccount[]> {
+  try {
+    const res = await apiFetch(`${API_BASE}/partners`)
+    const body = await res.json()
+    if (body.success && body.data) {
+      return body.data.map((p: any) => ({
+        id: String(p.id),
+        name: p.name,
+        mobileNumber: p.mobile_number,
+        profitSharePercentage: parseFloat(p.profit_share_percentage || '50'),
+        openingBalance: parseFloat(p.opening_balance || '0'),
+        currentBalance: parseFloat(p.equity_balance ?? p.current_balance ?? '0'),
+        totalInvestment: parseFloat(p.total_invested || '0'),
+        totalWithdrawal: parseFloat(p.total_drawings || '0'),
+        additionalContributions: 0,
+        adjustments: 0,
+        status: p.status || "Active",
+        notes: p.notes,
+        cashInHandled: parseFloat(p.cash_in_handled || '0'),
+        cashOutHandled: parseFloat(p.cash_out_handled || '0'),
+        netCashHandled: parseFloat(p.net_cash_handled || '0')
+      }))
+    }
+  } catch (err) {
+    console.error("fetchPartners failed", err)
+  }
+  return FALLBACK_STORE.partners
+}
+
+export async function createPartner(data: { name: string; mobileNumber?: string; profitSharePercentage?: number; openingBalance?: number; notes?: string }): Promise<PartnerAccount | null> {
+  try {
+    const payload = {
+      name: data.name,
+      mobile_number: data.mobileNumber,
+      profit_share_percentage: data.profitSharePercentage,
+      opening_balance: data.openingBalance,
+      notes: data.notes
+    }
+    const res = await apiFetch(`${API_BASE}/partners`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = await res.json()
+    if (body.success && body.data) {
+      const p = body.data
+      return {
+        id: String(p.id),
+        name: p.name,
+        mobileNumber: p.mobile_number,
+        profitSharePercentage: parseFloat(p.profit_share_percentage || '50'),
+        openingBalance: parseFloat(p.opening_balance || '0'),
+        currentBalance: parseFloat(p.current_balance || '0'),
+        totalInvestment: 0,
+        totalWithdrawal: 0,
+        additionalContributions: 0,
+        adjustments: 0,
+        status: p.status || "Active",
+        notes: p.notes
+      }
+    }
+  } catch (err) {
+    console.error("createPartner failed", err)
+  }
+  return null
+}
+
+export async function createPartnerTransaction(data: {
+  partnerId: string
+  transactionDate: string
+  transactionType: string
+  amount: number
+  paymentMethod?: string
+  notes?: string
+  syncCashbook?: boolean
+}): Promise<any> {
+  try {
+    const payload = {
+      partner_id: parseInt(data.partnerId, 10),
+      transaction_date: data.transactionDate,
+      transaction_type: data.transactionType,
+      amount: data.amount,
+      payment_method: data.paymentMethod || 'Cash',
+      notes: data.notes,
+      sync_cashbook: data.syncCashbook !== false
+    }
+    const res = await apiFetch(`${API_BASE}/partners/transactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = await res.json()
+    return body.data || null
+  } catch (err) {
+    console.error("createPartnerTransaction failed", err)
+    return null
+  }
+}
+
 export async function fetchPartnerSummary(): Promise<PartnerAccount[]> {
   try {
     const res = await apiFetch(`${API_BASE}/partners/summary`)
     const body = await res.json()
     if (body.success && body.data) {
-      // map backend values
-      return [
-        {
-          id: "pt-1",
-          name: "Rajubhai",
-          openingBalance: 0,
-          currentBalance: parseFloat(body.data.rajubhai_total_income_handled || 0) - parseFloat(body.data.rajubhai_total_expenses_handled || 0),
-          totalInvestment: parseFloat(body.data.rajubhai_total_income_handled || 0),
-          totalWithdrawal: parseFloat(body.data.rajubhai_total_expenses_handled || 0),
+      if (Array.isArray(body.data.partners)) {
+        return body.data.partners.map((p: any) => ({
+          id: String(p.id),
+          name: p.name,
+          mobileNumber: p.mobile_number,
+          profitSharePercentage: parseFloat(p.profit_share_percentage || '50'),
+          openingBalance: parseFloat(p.opening_balance || '0'),
+          currentBalance: parseFloat(p.equity_balance ?? p.current_balance ?? '0'),
+          totalInvestment: parseFloat(p.total_invested || '0'),
+          totalWithdrawal: parseFloat(p.total_drawings || '0'),
           additionalContributions: 0,
-          adjustments: 0
-        },
-        {
-          id: "pt-2",
-          name: "Dhruveshbhai",
-          openingBalance: 0,
-          currentBalance: parseFloat(body.data.dhruveshbhai_total_income_handled || 0) - parseFloat(body.data.dhruveshbhai_total_expenses_handled || 0),
-          totalInvestment: parseFloat(body.data.dhruveshbhai_total_income_handled || 0),
-          totalWithdrawal: parseFloat(body.data.dhruveshbhai_total_expenses_handled || 0),
-          additionalContributions: 0,
-          adjustments: 0
-        }
-      ]
+          adjustments: 0,
+          status: p.status || "Active",
+          notes: p.notes,
+          cashInHandled: parseFloat(p.cash_in_handled || '0'),
+          cashOutHandled: parseFloat(p.cash_out_handled || '0'),
+          netCashHandled: parseFloat(p.net_cash_handled || '0')
+        }))
+      }
     }
   } catch (err) {
     console.error("fetchPartnerSummary failed", err)
   }
-  return FALLBACK_STORE.partners
+  return fetchPartners()
+}
+
+export async function fetchPartnerEquityTransactions(partnerId?: string): Promise<PartnerTransaction[]> {
+  try {
+    const url = partnerId
+      ? `${API_BASE}/partners/transactions?type=equity&partner_id=${encodeURIComponent(partnerId)}`
+      : `${API_BASE}/partners/transactions?type=equity`
+    const res = await apiFetch(url)
+    const body = await res.json()
+    if (body.success && body.data) {
+      return body.data.map((pt: any) => ({
+        id: String(pt.id),
+        partnerId: String(pt.partner_id),
+        partnerName: pt.partner_name || "Partner",
+        type: pt.transaction_type,
+        date: pt.transaction_date,
+        amount: parseFloat(pt.amount || "0"),
+        paymentMethod: pt.payment_method || "Cash",
+        notes: pt.notes || ""
+      }))
+    }
+  } catch (err) {
+    console.error("fetchPartnerEquityTransactions failed", err)
+  }
+  return []
+}
+
+export async function updatePartner(partnerId: string, data: { name?: string; mobileNumber?: string; profitSharePercentage?: number; openingBalance?: number; status?: string; notes?: string }): Promise<PartnerAccount | null> {
+  try {
+    const payload: any = {}
+    if (data.name !== undefined) payload.name = data.name
+    if (data.mobileNumber !== undefined) payload.mobile_number = data.mobileNumber
+    if (data.profitSharePercentage !== undefined) payload.profit_share_percentage = data.profitSharePercentage
+    if (data.openingBalance !== undefined) payload.opening_balance = data.openingBalance
+    if (data.status !== undefined) payload.status = data.status
+    if (data.notes !== undefined) payload.notes = data.notes
+
+    const res = await apiFetch(`${API_BASE}/partners/${partnerId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const body = await res.json()
+    if (body.success && body.data) {
+      const p = body.data
+      return {
+        id: String(p.id),
+        name: p.name,
+        mobileNumber: p.mobile_number,
+        profitSharePercentage: parseFloat(p.profit_share_percentage || '50'),
+        openingBalance: parseFloat(p.opening_balance || '0'),
+        currentBalance: parseFloat(p.equity_balance ?? p.current_balance ?? '0'),
+        totalInvestment: parseFloat(p.total_invested || '0'),
+        totalWithdrawal: parseFloat(p.total_drawings || '0'),
+        additionalContributions: 0,
+        adjustments: 0,
+        status: p.status || "Active",
+        notes: p.notes,
+        cashInHandled: parseFloat(p.cash_in_handled || '0'),
+        cashOutHandled: parseFloat(p.cash_out_handled || '0'),
+        netCashHandled: parseFloat(p.net_cash_handled || '0')
+      }
+    }
+  } catch (err) {
+    console.error("updatePartner failed", err)
+  }
+  return null
 }
 
 export async function fetchPartnerTransactions(partnerName?: string): Promise<PartnerTransaction[]> {
@@ -1130,14 +1546,14 @@ export async function fetchPartnerTransactions(partnerName?: string): Promise<Pa
     const body = await res.json()
     if (body.success && body.data) {
       return body.data.map((c: any) => {
-        const handledByVal = c["Handled By"] || c.handled_by || "";
+        const handledByVal = c["Handled By"] || c.handled_by || c.partner_name || "";
         const incomeVal = parseFloat(c.Income || c.income_amount || 0);
         const outVal = parseFloat(c.Out || c.out_amount || 0);
         return {
           id: String(c.id),
-          partnerId: handledByVal === "Rajubhai" ? "pt-1" : "pt-2",
+          partnerId: String(c.partner_id || (handledByVal === "Rajubhai" ? "1" : "2")),
           partnerName: handledByVal || "Unknown",
-          type: incomeVal > 0 ? ("Investment" as const) : ("Withdrawal" as const),
+          type: incomeVal > 0 ? ("Capital Investment" as const) : ("Drawing (Personal Withdrawal)" as const),
           date: c.Date || c.transaction_date || "",
           amount: incomeVal > 0 ? incomeVal : outVal,
           notes: c.Notes || c.notes || ""
@@ -1212,6 +1628,53 @@ export async function getStoredData() {
     }
   })
 
+  const finishedGoods = await fetchFinishedGoods()
+
+  // Dynamically compute seth sub-histories for Seth details views
+  const fabricHistories: FabricHistory[] = fabricReceives.map(r => ({
+    id: `fh-${r.id}`,
+    sethId: r.sethId,
+    date: r.date,
+    rollNo: r.rollNo,
+    meters: r.receivedQty,
+    type: r.fabricType
+  }))
+
+  const rollTrackings: RollTracking[] = fabricReceives.map(r => ({
+    id: `rt-${r.id}`,
+    sethId: r.sethId,
+    rollNo: r.rollNo,
+    receivedQty: r.receivedQty,
+    usedQty: r.usedQty,
+    remainingQty: r.remainingQty,
+    status: (r.remainingQty <= 0 ? "Empty" : r.usedQty > 0 ? "Partial" : "Full") as any
+  }))
+
+  const productionHistories: ProductionHistory[] = cuttings.map(c => {
+    const roll = fabricReceives.find(r => r.id === c.rollId)
+    return {
+      id: `ph-${c.id}`,
+      sethId: roll?.sethId || "",
+      lotNo: c.lotNo,
+      cuttingDate: c.date,
+      piecesGenerated: c.pieces,
+      metersUsed: c.meterUsed
+    }
+  })
+
+  const paymentHistories: PaymentHistory[] = cashBook
+    .filter(cb => cb.type === "Money In" && seths.some(s => s.name.toLowerCase() === (cb.partyName || "").toLowerCase()))
+    .map(cb => {
+      const seth = seths.find(s => s.name.toLowerCase() === (cb.partyName || "").toLowerCase())
+      return {
+        id: `pay-${cb.id}`,
+        sethId: seth?.id || "",
+        date: cb.date,
+        amount: cb.amount,
+        remarks: cb.remarks || cb.category || "Client Stitching Payment"
+      }
+    })
+
   FALLBACK_STORE = {
     ...FALLBACK_STORE,
     employees: updatedEmployees,
@@ -1219,12 +1682,17 @@ export async function getStoredData() {
     salaryRecords,
     seths: updatedSeths,
     fabricReceives,
+    fabricHistories,
+    rollTrackings,
+    productionHistories,
+    paymentHistories,
     cuttings,
     expenses,
     incomes,
     cashBook,
     partners,
-    partnerTransactions
+    partnerTransactions,
+    finishedGoods
   }
 
   return FALLBACK_STORE

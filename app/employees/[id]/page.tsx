@@ -12,7 +12,8 @@ import {
   Edit3, 
   X, 
   Info,
-  Clock
+  Clock,
+  Scissors
 } from "lucide-react"
 import { 
   getStoredData, 
@@ -24,7 +25,8 @@ import {
   type Employee, 
   type SalaryRecord, 
   type CashBookRecord,
-  type Transaction 
+  type Transaction,
+  type CuttingEntry
 } from "@/lib/employee-store"
 
 interface Props {
@@ -52,6 +54,7 @@ export default function EmployeeDetailsPage({ params }: Props) {
   const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [cashBook, setCashBook] = useState<CashBookRecord[]>([])
+  const [cuttings, setCuttings] = useState<CuttingEntry[]>([])
 
   // Modal Dialog States
   const [activeDialog, setActiveDialog] = useState<"paySalary" | "addUpad" | "editEmployee" | null>(null)
@@ -118,6 +121,7 @@ export default function EmployeeDetailsPage({ params }: Props) {
     setSalaryRecords(data.salaryRecords || [])
     setTransactions(data.transactions || [])
     setCashBook(data.cashBook || [])
+    setCuttings(data.cuttings || [])
     
     const emp = (data.employees || []).find((e) => e.id === id)
     if (emp) {
@@ -560,6 +564,39 @@ export default function EmployeeDetailsPage({ params }: Props) {
               </div>
             )}
           </section>
+
+          {/* Assigned Cutting Lots (if any) */}
+          {cuttings.filter((c) => c.employeeId === id).length > 0 && (
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-base font-bold text-foreground flex items-center gap-1.5">
+                  <Scissors className="h-4 w-4 text-[#ea580c]" />
+                  <span>Assigned Cutting Lots ({cuttings.filter((c) => c.employeeId === id).length})</span>
+                </h3>
+                <span className="text-xs font-bold text-muted-foreground">
+                  {cuttings.filter((c) => c.employeeId === id).reduce((sum, c) => sum + c.pieces, 0).toLocaleString("en-IN")} pcs total
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {cuttings.filter((c) => c.employeeId === id).map((cut) => (
+                  <Link
+                    key={cut.id}
+                    href={`/cutting/${cut.id}`}
+                    className="bg-card p-4 rounded-2xl ring-1 ring-border/60 shadow-xs text-xs font-semibold hover:ring-primary/40 transition-all"
+                  >
+                    <div className="flex justify-between items-center mb-1.5 border-b border-border/40 pb-1.5">
+                      <span className="font-bold text-foreground">Lot #{cut.lotNo}</span>
+                      <span className="text-[10px] text-muted-foreground">{cut.date}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-muted-foreground">
+                      <span>Roll: {cut.rollNo}</span>
+                      <span className="text-[#ea580c] font-bold">{cut.pieces} Pieces ({cut.meterUsed}m)</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
 
       </div>

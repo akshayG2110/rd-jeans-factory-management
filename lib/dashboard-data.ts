@@ -52,6 +52,13 @@ export const modules: Module[] = [
     iconBg: "bg-[#ea580c]/10",
   },
   {
+    name: "Finished Goods",
+    description: "Garments & dispatch",
+    icon: Package,
+    iconColor: "text-[#ea580c]",
+    iconBg: "bg-[#ea580c]/10",
+  },
+  {
     name: "Roll Inventory",
     description: "Roll inventory",
     icon: Archive,
