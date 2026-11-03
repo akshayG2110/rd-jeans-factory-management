@@ -297,3 +297,4 @@ CREATE TABLE IF NOT EXISTS factory_balance (
 INSERT INTO factory_balance (id, current_balance)
 VALUES (1, 0.00)
 ON CONFLICT (id) DO NOTHING;
+
