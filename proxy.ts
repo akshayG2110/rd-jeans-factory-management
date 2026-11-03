@@ -104,16 +104,31 @@ export async function proxy(request: NextRequest) {
   // 4. Web Page Routes Auth Guard (UI Pages)
   const userCookie = request.cookies.get("rd_user")?.value || request.cookies.get("rd_token")?.value
 
-  // Not logged in -> Redirect to /login
-  if (!userCookie && pathname !== "/login") {
-    const loginUrl = new URL("/login", request.url)
-    return NextResponse.redirect(loginUrl)
+  // When visiting /login
+  if (pathname === "/login") {
+    const searchParams = request.nextUrl.searchParams
+    // If error or logout is requested, clear session cookies and display login page
+    if (searchParams.has("error") || searchParams.has("logout")) {
+      const response = NextResponse.next()
+      response.cookies.delete("rd_user")
+      response.cookies.delete("rd_token")
+      return response
+    }
+
+    // If authenticated user visits /login, redirect to dashboard
+    if (userCookie) {
+      const dashboardUrl = new URL("/", request.url)
+      return NextResponse.redirect(dashboardUrl)
+    }
+
+    // Unauthenticated user can view /login
+    return NextResponse.next()
   }
 
-  // Logged in + visiting /login -> Redirect to dashboard (/)
-  if (userCookie && pathname === "/login") {
-    const dashboardUrl = new URL("/", request.url)
-    return NextResponse.redirect(dashboardUrl)
+  // Protected pages: Not logged in -> Redirect to /login
+  if (!userCookie) {
+    const loginUrl = new URL("/login", request.url)
+    return NextResponse.redirect(loginUrl)
   }
 
   return NextResponse.next()

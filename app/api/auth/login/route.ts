@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     })
 
     response.cookies.set('rd_token', token, {
-      httpOnly: true,
+      httpOnly: false,
       sameSite: 'lax',
       path: '/',
       maxAge: 86400 // 24 hours

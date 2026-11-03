@@ -1,47 +1,47 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const checkAuth = () => {
-      const userStr = localStorage.getItem("rd_user")
-      const isLoginPage = pathname === "/login"
+    if (typeof window === "undefined") return
 
-      if (!userStr && !isLoginPage) {
-        // Not authenticated, send to login
-        router.replace("/login")
-      } else if (userStr && isLoginPage) {
-        // Authenticated, redirect away from login page
-        router.replace("/")
-      } else {
-        setLoading(false)
+    const isLoginPage = pathname === "/login"
+    const userStr = localStorage.getItem("rd_user")
+    const hasCookie = document.cookie.includes("rd_user=") || document.cookie.includes("rd_token=")
+
+    if (isLoginPage) {
+      // If we are on the login page and do not have active session cookies,
+      // clear any stale or lingering localStorage so it never triggers bounces or loops
+      if (!hasCookie && userStr) {
+        localStorage.removeItem("rd_user")
+      }
+    } else {
+      // On protected pages:
+      // If cookies exist but localStorage was cleared, heal localStorage
+      if (!userStr && hasCookie) {
+        const match = document.cookie.match(/rd_user=([^;]+)/)
+        const username = match ? decodeURIComponent(match[1]) : "rdjeans123"
+        localStorage.setItem("rd_user", JSON.stringify({ username }))
       }
     }
 
-    checkAuth()
-    
-    // Add event listener to capture storage changes (logout)
-    window.addEventListener("storage", checkAuth)
+    // Capture logout events triggered across tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "rd_user" && !e.newValue && pathname !== "/login") {
+        router.replace("/login?logout=true")
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange)
     return () => {
-      window.removeEventListener("storage", checkAuth)
+      window.removeEventListener("storage", handleStorageChange)
     }
   }, [pathname, router])
-
-  if (loading && pathname !== "/login") {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="text-xs font-bold text-muted-foreground mt-2">Authenticating Session...</p>
-      </div>
-    )
-  }
 
   return <>{children}</>
 }

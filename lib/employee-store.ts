@@ -1567,7 +1567,22 @@ export async function fetchPartnerTransactions(partnerName?: string): Promise<Pa
 }
 
 // Aggregated fallback function for components utilizing the full store
-export async function getStoredData() {
+// In-flight request deduplication and caching for getStoredData
+let inFlightStoredDataPromise: Promise<typeof FALLBACK_STORE> | null = null
+let lastStoredDataFetchTime = 0
+const STORED_DATA_TTL_MS = 1000
+
+export async function getStoredData(forceRefresh = false) {
+  const now = Date.now()
+  if (!forceRefresh && inFlightStoredDataPromise) {
+    return inFlightStoredDataPromise
+  }
+  if (!forceRefresh && lastStoredDataFetchTime > 0 && now - lastStoredDataFetchTime < STORED_DATA_TTL_MS) {
+    return FALLBACK_STORE
+  }
+
+  inFlightStoredDataPromise = (async () => {
+    try {
   const [
     employees,
     transactions,
@@ -1695,7 +1710,14 @@ export async function getStoredData() {
     finishedGoods
   }
 
+  lastStoredDataFetchTime = Date.now()
   return FALLBACK_STORE
+    } finally {
+      inFlightStoredDataPromise = null
+    }
+  })()
+
+  return inFlightStoredDataPromise
 }
 
 
