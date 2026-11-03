@@ -44,6 +44,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       if (!window.location.pathname.startsWith("/login")) {
         localStorage.removeItem("rd_user")
         document.cookie = "rd_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+        document.cookie = "rd_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
         document.cookie = "is_authenticated=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
         window.location.href = "/login?error=session_expired"
       }

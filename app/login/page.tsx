@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 
 export default function LoginPage() {
@@ -9,6 +9,15 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get("error") === "session_expired") {
+        setError("Your session has expired. Please log in again.")
+      }
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,11 +37,11 @@ export default function LoginPage() {
 
       if (response.ok && data.success) {
         localStorage.setItem("rd_user", JSON.stringify(data.user))
-        document.cookie = `rd_user=${data.user.username}; path=/; max-age=86400`
+        document.cookie = `rd_user=${encodeURIComponent(data.user.username)}; path=/; max-age=86400; SameSite=Lax`
         if (data.user?.token) {
-          document.cookie = `rd_token=${data.user.token}; path=/; max-age=86400`
+          document.cookie = `rd_token=${data.user.token}; path=/; max-age=86400; SameSite=Lax`
         }
-        router.push("/")
+        window.location.href = "/"
       } else {
         const detailMsg = typeof data.detail === "string" ? data.detail : data.detail?.message
         setError(detailMsg || data.message || "Invalid username or password")
