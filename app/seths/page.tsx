@@ -42,6 +42,7 @@ export default function SethsPage() {
   const [formAddress, setFormAddress] = useState("")
   const [formNotes, setFormNotes] = useState("")
   const [formStatus, setFormStatus] = useState<Seth["status"]>("Active")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -83,35 +84,40 @@ export default function SethsPage() {
 
   const handleSaveSeth = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formName.trim()) return
+    if (isSubmitting || !formName.trim()) return
 
-    if (dialogMode === "add") {
-      const result = await createSeth({
-        name: formName.trim(),
-        contact: formContact.trim(),
-        address: formAddress.trim(),
-        notes: formNotes.trim(),
-        status: "Active"
-      })
-      if (result) {
-        setSeths((prev) => [result, ...prev])
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        const result = await createSeth({
+          name: formName.trim(),
+          contact: formContact.trim(),
+          address: formAddress.trim(),
+          notes: formNotes.trim(),
+          status: "Active"
+        })
+        if (result) {
+          setSeths((prev) => [result, ...prev])
+        }
+      } else if (dialogMode === "edit" && editingSethId) {
+        const result = await updateSeth(editingSethId, {
+          name: formName.trim(),
+          contact: formContact.trim(),
+          address: formAddress.trim(),
+          notes: formNotes.trim(),
+          status: formStatus
+        })
+        if (result) {
+          setSeths((prev) =>
+            prev.map((s) => (s.id === editingSethId ? { ...s, ...result } : s))
+          )
+        }
       }
-    } else if (dialogMode === "edit" && editingSethId) {
-      const result = await updateSeth(editingSethId, {
-        name: formName.trim(),
-        contact: formContact.trim(),
-        address: formAddress.trim(),
-        notes: formNotes.trim(),
-        status: formStatus
-      })
-      if (result) {
-        setSeths((prev) =>
-          prev.map((s) => (s.id === editingSethId ? { ...s, ...result } : s))
-        )
-      }
+
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
     }
-
-    setIsDialogOpen(false)
   }
 
   // Summary Metrics calculations
@@ -456,9 +462,11 @@ export default function SethsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Button
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : (dialogMode === "add" ? "Save Seth" : "Update Seth")}</span>
                 </button>
               </div>
             </form>

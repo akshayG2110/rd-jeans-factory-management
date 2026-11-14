@@ -33,6 +33,7 @@ export default function UpadDetailsPage({ params }: Props) {
   const [formAmount, setFormAmount] = useState("")
   const [formDate, setFormDate] = useState("")
   const [formNotes, setFormNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -84,21 +85,27 @@ export default function UpadDetailsPage({ params }: Props) {
 
   const handleAddUpadSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     const amountNum = parseFloat(formAmount)
     if (isNaN(amountNum) || amountNum <= 0) return
 
-    await createUpad({
-      employeeId: id,
-      amount: amountNum,
-      date: formDate,
-      description: formNotes || "Upad advance given",
-      notes: formNotes
-    })
+    setIsSubmitting(true)
+    try {
+      await createUpad({
+        employeeId: id,
+        amount: amountNum,
+        date: formDate,
+        description: formNotes || "Upad advance given",
+        notes: formNotes
+      })
 
-    await loadData()
-    setIsDialogOpen(false)
-    setFormAmount("")
-    setFormNotes("")
+      await loadData()
+      setIsDialogOpen(false)
+      setFormAmount("")
+      setFormNotes("")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Salary adjustments
@@ -294,9 +301,11 @@ export default function UpadDetailsPage({ params }: Props) {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Button
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : "Save Upad"}</span>
                 </button>
               </div>
             </form>

@@ -56,6 +56,7 @@ export default function RollsPage() {
   const [formMeters, setFormMeters] = useState("")
   const [formDate, setFormDate] = useState("")
   const [formNotes, setFormNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -107,38 +108,44 @@ export default function RollsPage() {
 
   const handleSaveRoll = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     const metersNum = parseFloat(formMeters)
     if (isNaN(metersNum) || metersNum <= 0 || !formSethId) return
 
     const selectedSeth = seths.find((s) => s.id === formSethId)
     if (!selectedSeth) return
 
-    if (dialogMode === "add") {
-      await createFabricReceive({
-        rollNo: formRollNo.trim(),
-        shortNo: formShortNo.trim(),
-        sethId: formSethId,
-        sethName: selectedSeth.name,
-        fabricType: formFabricType,
-        receivedQty: metersNum,
-        date: formDate,
-        notes: formNotes.trim() || `New Fabric Roll added manually`
-      })
-    } else if (dialogMode === "edit" && editingRollId) {
-      await updateFabricReceive(editingRollId, {
-        sethId: formSethId,
-        sethName: selectedSeth.name,
-        rollNo: formRollNo.trim(),
-        shortNo: formShortNo.trim(),
-        fabricType: formFabricType,
-        receivedQty: metersNum,
-        date: formDate,
-        notes: formNotes.trim()
-      })
-    }
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        await createFabricReceive({
+          rollNo: formRollNo.trim(),
+          shortNo: formShortNo.trim(),
+          sethId: formSethId,
+          sethName: selectedSeth.name,
+          fabricType: formFabricType,
+          receivedQty: metersNum,
+          date: formDate,
+          notes: formNotes.trim() || `New Fabric Roll added manually`
+        })
+      } else if (dialogMode === "edit" && editingRollId) {
+        await updateFabricReceive(editingRollId, {
+          sethId: formSethId,
+          sethName: selectedSeth.name,
+          rollNo: formRollNo.trim(),
+          shortNo: formShortNo.trim(),
+          fabricType: formFabricType,
+          receivedQty: metersNum,
+          date: formDate,
+          notes: formNotes.trim()
+        })
+      }
 
-    await loadData()
-    setIsDialogOpen(false)
+      await loadData()
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Summary Metrics calculations
@@ -557,9 +564,11 @@ export default function RollsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Button
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : (dialogMode === "add" ? "Save Roll" : "Update Roll")}</span>
                 </button>
               </div>
             </form>

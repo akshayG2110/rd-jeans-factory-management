@@ -59,6 +59,7 @@ export default function SalaryPage() {
   const [pendingUpadTotal, setPendingUpadTotal] = useState(0)
   const [pendingUpadCount, setPendingUpadCount] = useState(0)
   const [deductUpad, setDeductUpad] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -167,6 +168,7 @@ export default function SalaryPage() {
 
   const handleSaveSalary = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!formHandledBy) {
       alert("Please select a partner (Handled By).")
       return
@@ -179,34 +181,39 @@ export default function SalaryPage() {
     const selectedEmp = employees.find((emp) => emp.id === formEmployeeId)
     if (!selectedEmp) return
 
-    if (dialogMode === "add") {
-      await createSalary({
-        employeeId: formEmployeeId,
-        month: formMonth,
-        year: formYear,
-        salaryAmount: salaryAmt,
-        paidAmount: paidAmt,
-        notes: formNotes || `${formMonth} ${formYear} salary entry`,
-        date: new Date().toISOString().split("T")[0],
-        paymentMethod: formPaymentMethod,
-        handledBy: formHandledBy,
-        deductUpad
-      })
-    } else if (dialogMode === "edit" && editingRecordId) {
-      await updateSalary(editingRecordId, {
-        month: formMonth,
-        year: formYear,
-        salaryAmount: salaryAmt,
-        paidAmount: paidAmt,
-        notes: formNotes,
-        paymentMethod: formPaymentMethod,
-        handledBy: formHandledBy,
-        date: new Date().toISOString().split("T")[0]
-      })
-    }
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        await createSalary({
+          employeeId: formEmployeeId,
+          month: formMonth,
+          year: formYear,
+          salaryAmount: salaryAmt,
+          paidAmount: paidAmt,
+          notes: formNotes || `${formMonth} ${formYear} salary entry`,
+          date: new Date().toISOString().split("T")[0],
+          paymentMethod: formPaymentMethod,
+          handledBy: formHandledBy,
+          deductUpad
+        })
+      } else if (dialogMode === "edit" && editingRecordId) {
+        await updateSalary(editingRecordId, {
+          month: formMonth,
+          year: formYear,
+          salaryAmount: salaryAmt,
+          paidAmount: paidAmt,
+          notes: formNotes,
+          paymentMethod: formPaymentMethod,
+          handledBy: formHandledBy,
+          date: new Date().toISOString().split("T")[0]
+        })
+      }
 
-    await loadData()
-    setIsDialogOpen(false)
+      await loadData()
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Filter records based on criteria
@@ -650,9 +657,11 @@ export default function SalaryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Entry
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : "Save Entry"}</span>
                 </button>
               </div>
             </form>

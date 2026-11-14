@@ -39,6 +39,7 @@ export default function SalaryDetailsPage({ params }: Props) {
 
   // Modal dialog states
   const [activeDialog, setActiveDialog] = useState<"pay" | "edit" | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Form Fields for Pay
   const [payAmount, setPayAmount] = useState("")
@@ -133,40 +134,52 @@ export default function SalaryDetailsPage({ params }: Props) {
 
   const handlePayBalance = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     const amt = parseFloat(payAmount)
     if (isNaN(amt) || amt <= 0) return
 
-    const newPaidAmount = record.paidAmount + amt
+    setIsSubmitting(true)
+    try {
+      const newPaidAmount = record.paidAmount + amt
 
-    await updateSalary(record.id, {
-      paidAmount: newPaidAmount,
-      notes: payNotes || `Balance payment of ₹${amt} processed`,
-      date: new Date().toISOString().split("T")[0]
-    })
+      await updateSalary(record.id, {
+        paidAmount: newPaidAmount,
+        notes: payNotes || `Balance payment of ₹${amt} processed`,
+        date: new Date().toISOString().split("T")[0]
+      })
 
-    await loadData()
-    setActiveDialog(null)
-    setPayNotes("")
+      await loadData()
+      setActiveDialog(null)
+      setPayNotes("")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleEditRecord = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     const sal = parseFloat(editSalaryAmount)
     const paid = parseFloat(editPaidAmount)
 
     if (isNaN(sal) || isNaN(paid) || sal < 0 || paid < 0) return
 
-    await updateSalary(record.id, {
-      month: editMonth,
-      year: editYear,
-      salaryAmount: sal,
-      paidAmount: paid,
-      notes: editNotes,
-      date: new Date().toISOString().split("T")[0]
-    })
+    setIsSubmitting(true)
+    try {
+      await updateSalary(record.id, {
+        month: editMonth,
+        year: editYear,
+        salaryAmount: sal,
+        paidAmount: paid,
+        notes: editNotes,
+        date: new Date().toISOString().split("T")[0]
+      })
 
-    await loadData()
-    setActiveDialog(null)
+      await loadData()
+      setActiveDialog(null)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handlePrintSlip = () => {
@@ -402,9 +415,10 @@ export default function SalaryDetailsPage({ params }: Props) {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-emerald-600 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-emerald-600 py-3 text-xs font-bold text-white transition-all hover:bg-emerald-500 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Record Payment
+                  {isSubmitting ? "Processing..." : "Record Payment"}
                 </button>
               </div>
             </form>
@@ -497,9 +511,10 @@ export default function SalaryDetailsPage({ params }: Props) {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Save Changes
+                  {isSubmitting ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>

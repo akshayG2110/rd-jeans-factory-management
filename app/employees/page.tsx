@@ -41,6 +41,7 @@ export default function EmployeesPage() {
   const [formName, setFormName] = useState("")
   const [formRole, setFormRole] = useState<Employee["role"]>("Stitching Worker")
   const [formStatus, setFormStatus] = useState<Employee["status"]>("active")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -76,24 +77,29 @@ export default function EmployeesPage() {
 
   const handleSaveEmployee = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formName.trim()) return
+    if (isSubmitting || !formName.trim()) return
 
-    if (dialogMode === "add") {
-      await createEmployee({
-        name: formName.trim(),
-        role: formRole,
-        status: "active"
-      })
-    } else if (dialogMode === "edit" && selectedEmployeeId) {
-      await updateEmployee(selectedEmployeeId, {
-        name: formName.trim(),
-        role: formRole,
-        status: formStatus
-      })
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        await createEmployee({
+          name: formName.trim(),
+          role: formRole,
+          status: "active"
+        })
+      } else if (dialogMode === "edit" && selectedEmployeeId) {
+        await updateEmployee(selectedEmployeeId, {
+          name: formName.trim(),
+          role: formRole,
+          status: formStatus
+        })
+      }
+
+      await loadData()
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
     }
-
-    await loadData()
-    setIsDialogOpen(false)
   }
 
   const currentDateObj = new Date()
@@ -373,9 +379,10 @@ export default function EmployeesPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Save Employee
+                  {isSubmitting ? "Saving..." : (dialogMode === "add" ? "Save Employee" : "Update Employee")}
                 </button>
               </div>
             </form>

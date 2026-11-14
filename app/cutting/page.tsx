@@ -54,6 +54,7 @@ export default function CuttingPage() {
   const [formSortNo, setFormSortNo] = useState("S-101")
   const [formStatus, setFormStatus] = useState<CuttingEntry["status"]>("In Progress")
   const [formNotes, setFormNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -115,6 +116,8 @@ export default function CuttingPage() {
 
   const handleSaveCutting = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
+
     const metersUsedNum = parseFloat(formMeterUsed)
     const piecesNum = parseInt(formPieces)
 
@@ -123,42 +126,47 @@ export default function CuttingPage() {
     const selectedRoll = fabricReceives.find((r) => r.id === formRollId)
     if (!selectedRoll) return
 
-    if (dialogMode === "add") {
-      await createCutting({
-        lotNo: formLotNo.trim(),
-        date: formDate,
-        rollId: formRollId,
-        rollNo: selectedRoll.rollNo,
-        employeeId: formEmployeeId || undefined,
-        meterUsed: metersUsedNum,
-        pieces: piecesNum,
-        size: formSize,
-        layerInfo: formLayers,
-        pana: formPana,
-        average: formAverage,
-        sortNo: formSortNo,
-        notes: formNotes.trim() || `Lot ${formLotNo} cutting entry`
-      })
-    } else if (dialogMode === "edit" && editingEntryId) {
-      await updateCutting(editingEntryId, {
-        lotNo: formLotNo.trim(),
-        rollId: formRollId,
-        rollNo: selectedRoll.rollNo,
-        employeeId: formEmployeeId || undefined,
-        meterUsed: metersUsedNum,
-        pieces: piecesNum,
-        size: formSize,
-        layerInfo: formLayers,
-        pana: formPana,
-        average: formAverage,
-        sortNo: formSortNo,
-        notes: formNotes.trim(),
-        date: formDate
-      })
-    }
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        await createCutting({
+          lotNo: formLotNo.trim(),
+          date: formDate,
+          rollId: formRollId,
+          rollNo: selectedRoll.rollNo,
+          employeeId: formEmployeeId || undefined,
+          meterUsed: metersUsedNum,
+          pieces: piecesNum,
+          size: formSize,
+          layerInfo: formLayers,
+          pana: formPana,
+          average: formAverage,
+          sortNo: formSortNo,
+          notes: formNotes.trim() || `Lot ${formLotNo} cutting entry`
+        })
+      } else if (dialogMode === "edit" && editingEntryId) {
+        await updateCutting(editingEntryId, {
+          lotNo: formLotNo.trim(),
+          rollId: formRollId,
+          rollNo: selectedRoll.rollNo,
+          employeeId: formEmployeeId || undefined,
+          meterUsed: metersUsedNum,
+          pieces: piecesNum,
+          size: formSize,
+          layerInfo: formLayers,
+          pana: formPana,
+          average: formAverage,
+          sortNo: formSortNo,
+          notes: formNotes.trim(),
+          date: formDate
+        })
+      }
 
-    await loadData()
-    setIsDialogOpen(false)
+      await loadData()
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Summary calculations
@@ -689,9 +697,11 @@ export default function CuttingPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Button
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : (dialogMode === "add" ? "Save Cutting" : "Update Cutting")}</span>
                 </button>
               </div>
             </form>

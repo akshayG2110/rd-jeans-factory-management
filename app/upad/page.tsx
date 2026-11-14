@@ -87,6 +87,7 @@ export default function UpadPage() {
 
   const handleAddUpadSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSaving) return
     if (!formHandledBy) {
       alert("Please select a partner (Handled By).")
       return

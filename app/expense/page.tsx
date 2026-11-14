@@ -100,6 +100,7 @@ export default function ExpensePage() {
   const [formStatus, setFormStatus] = useState<ExpenseRecord["status"]>("Paid")
   const [formHandledBy, setFormHandledBy] = useState<string>("")
   const [formPartyName, setFormPartyName] = useState<string>("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -150,6 +151,7 @@ export default function ExpensePage() {
 
   const handleSaveExpense = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!formHandledBy) {
       alert("Please select a partner (Handled By).")
       return
@@ -157,36 +159,41 @@ export default function ExpensePage() {
     const amtNum = parseFloat(formAmount)
     if (isNaN(amtNum) || amtNum <= 0) return
 
-    if (dialogMode === "add") {
-      await createExpense({
-        title: formTitle.trim() || `${formCategory} Bill`,
-        category: formCategory,
-        amount: amtNum,
-        date: formDate,
-        paymentMethod: formPaymentMethod,
-        refNo: formRefNo,
-        remarks: formRemarks.trim(),
-        status: formStatus,
-        handledBy: formHandledBy,
-        partyName: formPartyName.trim()
-      })
-    } else if (dialogMode === "edit" && editingExpenseId) {
-      await updateExpense(editingExpenseId, {
-        title: formTitle.trim(),
-        category: formCategory,
-        amount: amtNum,
-        date: formDate,
-        paymentMethod: formPaymentMethod,
-        refNo: formRefNo,
-        remarks: formRemarks.trim(),
-        status: formStatus,
-        handledBy: formHandledBy,
-        partyName: formPartyName.trim()
-      })
-    }
+    setIsSubmitting(true)
+    try {
+      if (dialogMode === "add") {
+        await createExpense({
+          title: formTitle.trim() || `${formCategory} Bill`,
+          category: formCategory,
+          amount: amtNum,
+          date: formDate,
+          paymentMethod: formPaymentMethod,
+          refNo: formRefNo,
+          remarks: formRemarks.trim(),
+          status: formStatus,
+          handledBy: formHandledBy,
+          partyName: formPartyName.trim()
+        })
+      } else if (dialogMode === "edit" && editingExpenseId) {
+        await updateExpense(editingExpenseId, {
+          title: formTitle.trim(),
+          category: formCategory,
+          amount: amtNum,
+          date: formDate,
+          paymentMethod: formPaymentMethod,
+          refNo: formRefNo,
+          remarks: formRemarks.trim(),
+          status: formStatus,
+          handledBy: formHandledBy,
+          partyName: formPartyName.trim()
+        })
+      }
 
-    await loadData()
-    setIsDialogOpen(false)
+      await loadData()
+      setIsDialogOpen(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Summary Metrics calculations (Status === "Paid")
@@ -747,9 +754,11 @@ export default function ExpensePage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#dc2626] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#dc2626] py-3 text-xs font-bold text-white transition-all hover:opacity-95 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Entry
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : (dialogMode === "add" ? "Save Expense" : "Update Expense")}</span>
                 </button>
               </div>
             </form>

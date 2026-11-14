@@ -71,6 +71,7 @@ export default function InventoryPage() {
   const [newPieces, setNewPieces] = useState("")
   const [newUnitPrice, setNewUnitPrice] = useState("")
   const [newNotes, setNewNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadData = async () => {
     const data = await getStoredData()
@@ -103,25 +104,30 @@ export default function InventoryPage() {
 
   const handleSaveStage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedItem) return
+    if (isSubmitting || !selectedItem) return
 
     const stitching = parseInt(modalStitching) || 0
     const finished = parseInt(modalFinished) || 0
     const rejected = parseInt(modalRejected) || 0
     const dispatched = parseInt(modalDispatched) || 0
 
-    await updateFinishedGoodsItem(selectedItem.id, {
-      status: modalStatus,
-      stitchingPieces: stitching,
-      finishedPieces: finished,
-      rejectedPieces: rejected,
-      dispatchedPieces: dispatched,
-      dispatchDate: modalStatus === "Dispatched" ? modalDispatchDate : undefined,
-      notes: modalNotes.trim()
-    })
+    setIsSubmitting(true)
+    try {
+      await updateFinishedGoodsItem(selectedItem.id, {
+        status: modalStatus,
+        stitchingPieces: stitching,
+        finishedPieces: finished,
+        rejectedPieces: rejected,
+        dispatchedPieces: dispatched,
+        dispatchDate: modalStatus === "Dispatched" ? modalDispatchDate : undefined,
+        notes: modalNotes.trim()
+      })
 
-    setStageModalOpen(false)
-    await loadData()
+      setStageModalOpen(false)
+      await loadData()
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleOpenAddModal = () => {
@@ -139,26 +145,31 @@ export default function InventoryPage() {
 
   const handleSaveNewSKU = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newCuttingId || !newPieces) return
+    if (isSubmitting || !newCuttingId || !newPieces) return
 
     const selectedCut = cuttings.find(c => c.id === newCuttingId)
     if (!selectedCut) return
 
-    await createFinishedGoodsItem({
-      cuttingId: newCuttingId,
-      lotNumber: selectedCut.lotNo,
-      itemName: newItemName.trim() || "Denim Jeans",
-      size: newSize.trim(),
-      colorShade: newColorShade.trim() || "Dark Indigo",
-      totalPieces: parseInt(newPieces, 10),
-      finishedPieces: parseInt(newPieces, 10),
-      status: "Cut",
-      unitPrice: newUnitPrice ? parseFloat(newUnitPrice) : 0,
-      notes: newNotes.trim()
-    })
+    setIsSubmitting(true)
+    try {
+      await createFinishedGoodsItem({
+        cuttingId: newCuttingId,
+        lotNumber: selectedCut.lotNo,
+        itemName: newItemName.trim() || "Denim Jeans",
+        size: newSize.trim(),
+        colorShade: newColorShade.trim() || "Dark Indigo",
+        totalPieces: parseInt(newPieces, 10),
+        finishedPieces: parseInt(newPieces, 10),
+        status: "Cut",
+        unitPrice: newUnitPrice ? parseFloat(newUnitPrice) : 0,
+        notes: newNotes.trim()
+      })
 
-    setAddModalOpen(false)
-    await loadData()
+      setAddModalOpen(false)
+      await loadData()
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const filteredItems = items.filter((item) => {
@@ -536,9 +547,11 @@ export default function InventoryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#ea580c] py-2.5 text-xs font-bold text-white shadow-sm"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#ea580c] py-2.5 text-xs font-bold text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Save Progression
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Saving..." : "Save Progression"}</span>
                 </button>
               </div>
             </form>
@@ -660,9 +673,11 @@ export default function InventoryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-2xl bg-[#ea580c] py-2.5 text-xs font-bold text-white shadow-sm"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-[#ea580c] py-2.5 text-xs font-bold text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Create Garment SKU
+                  {isSubmitting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                  <span>{isSubmitting ? "Creating..." : "Create Garment SKU"}</span>
                 </button>
               </div>
             </form>

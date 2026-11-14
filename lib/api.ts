@@ -2,6 +2,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
 
 type InvalidateListener = () => void
 const mutationListeners: InvalidateListener[] = []
+const inFlightMutations = new Map<string, Promise<Response>>()
 
 export function onApiMutation(listener: InvalidateListener) {
   mutationListeners.push(listener)
@@ -27,6 +28,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     }
   }
 
+  // Prevent duplicate submissions if user rapidly clicks a button 2-5 times
+  const method = (init?.method || "GET").toUpperCase()
+  const isMutation = ["POST", "PUT", "DELETE", "PATCH"].includes(method)
+  const mutationKey = isMutation
+    ? `${method}:${targetUrl}:${typeof init?.body === "string" ? init.body : ""}`
+    : null
+
+  if (mutationKey && inFlightMutations.has(mutationKey)) {
+    const existing = inFlightMutations.get(mutationKey)!
+    return existing.then((res) => res.clone())
+  }
+
   // Inject headers
   const headers = new Headers(init?.headers)
 
@@ -44,38 +57,50 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     }
   }
 
-  try {
-    const response = await fetch(targetUrl, { ...init, headers })
+  const execFetch = (async (): Promise<Response> => {
+    try {
+      const response = await fetch(targetUrl, { ...init, headers })
 
-    if (response.status === 401 && typeof window !== "undefined") {
-      if (!window.location.pathname.startsWith("/login")) {
-        localStorage.removeItem("rd_user")
-        document.cookie = "rd_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
-        document.cookie = "rd_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
-        document.cookie = "is_authenticated=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
-        window.location.href = "/login?error=session_expired"
+      if (response.status === 401 && typeof window !== "undefined") {
+        if (!window.location.pathname.startsWith("/login")) {
+          localStorage.removeItem("rd_user")
+          document.cookie = "rd_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+          document.cookie = "rd_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+          document.cookie = "is_authenticated=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+          window.location.href = "/login?error=session_expired"
+        }
       }
-    }
 
-    if (response.ok) {
-      const method = (init?.method || "GET").toUpperCase()
-      if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
-        mutationListeners.forEach(fn => {
-          try { fn() } catch {}
+      if (response.ok && isMutation) {
+        mutationListeners.forEach((fn) => {
+          try {
+            fn()
+          } catch {}
         })
       }
+
+      return response
+    } catch (err: any) {
+      console.error("apiFetch network exception details:", err)
+      let errorDetail = "Network connection failed. Please check your connection."
+      const errMsg = String(err.message || "").toLowerCase()
+
+      if (errMsg.includes("failed to fetch") || errMsg.includes("load failed")) {
+        errorDetail = "The API server is unreachable. Please verify your connection."
+      }
+
+      throw new Error(errorDetail)
+    } finally {
+      if (mutationKey) {
+        // Debounce lock for 800ms to absorb rapid spam clicks
+        setTimeout(() => inFlightMutations.delete(mutationKey), 800)
+      }
     }
+  })()
 
-    return response
-  } catch (err: any) {
-    console.error("apiFetch network exception details:", err)
-    let errorDetail = "Network connection failed. Please check your connection."
-    const errMsg = String(err.message || "").toLowerCase()
-
-    if (errMsg.includes("failed to fetch") || errMsg.includes("load failed")) {
-      errorDetail = "The API server is unreachable. Please verify your connection."
-    }
-
-    throw new Error(errorDetail)
+  if (mutationKey) {
+    inFlightMutations.set(mutationKey, execFetch)
   }
+
+  return await execFetch
 }

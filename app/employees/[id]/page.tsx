@@ -58,6 +58,7 @@ export default function EmployeeDetailsPage({ params }: Props) {
 
   // Modal Dialog States
   const [activeDialog, setActiveDialog] = useState<"paySalary" | "addUpad" | "editEmployee" | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Edit Employee Form
   const [editName, setEditName] = useState("")
@@ -251,21 +252,28 @@ export default function EmployeeDetailsPage({ params }: Props) {
   // Save changes
   const handleEditEmployee = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!editName.trim()) return
 
-    await updateEmployee(id, {
-      name: editName.trim(),
-      role: editRole,
-      status: editStatus
-    })
+    setIsSubmitting(true)
+    try {
+      await updateEmployee(id, {
+        name: editName.trim(),
+        role: editRole,
+        status: editStatus
+      })
 
-    await loadData()
-    setActiveDialog(null)
+      await loadData()
+      setActiveDialog(null)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // ADD UPAD
   const handleAddUpad = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!inputUpadHandledBy) {
       alert("Please select a partner (Handled By).")
       return
@@ -273,26 +281,32 @@ export default function EmployeeDetailsPage({ params }: Props) {
     const amount = parseFloat(inputUpadAmount)
     if (isNaN(amount) || amount <= 0) return
 
-    await createUpad({
-      employeeId: id,
-      amount,
-      date: inputUpadDate,
-      description: inputUpadRemarks.trim() || `Issued Upad Advance (${inputUpadMethod})`,
-      paymentMethod: inputUpadMethod,
-      notes: inputUpadRemarks.trim(),
-      handledBy: inputUpadHandledBy
-    })
+    setIsSubmitting(true)
+    try {
+      await createUpad({
+        employeeId: id,
+        amount,
+        date: inputUpadDate,
+        description: inputUpadRemarks.trim() || `Issued Upad Advance (${inputUpadMethod})`,
+        paymentMethod: inputUpadMethod,
+        notes: inputUpadRemarks.trim(),
+        handledBy: inputUpadHandledBy
+      })
 
-    await loadData()
-    setActiveDialog(null)
-    setInputUpadAmount("")
-    setInputUpadRemarks("")
-    setInputUpadHandledBy("")
+      await loadData()
+      setActiveDialog(null)
+      setInputUpadAmount("")
+      setInputUpadRemarks("")
+      setInputUpadHandledBy("")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // PAY SALARY
   const handlePaySalary = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!inputSalaryHandledBy) {
       alert("Please select a partner (Handled By).")
       return
@@ -301,24 +315,29 @@ export default function EmployeeDetailsPage({ params }: Props) {
     const paidVal = parseFloat(inputSalaryPaid)
     if (isNaN(salaryVal) || salaryVal <= 0 || isNaN(paidVal) || paidVal < 0) return
 
-    await createSalary({
-      employeeId: id,
-      month: inputSalaryMonth,
-      year: inputSalaryYear,
-      salaryAmount: salaryVal,
-      paidAmount: paidVal,
-      notes: inputSalaryRemarks.trim() || `${inputSalaryMonth} ${inputSalaryYear} salary payment processed`,
-      date: inputSalaryDate,
-      paymentMethod: inputSalaryMethod,
-      handledBy: inputSalaryHandledBy
-    })
+    setIsSubmitting(true)
+    try {
+      await createSalary({
+        employeeId: id,
+        month: inputSalaryMonth,
+        year: inputSalaryYear,
+        salaryAmount: salaryVal,
+        paidAmount: paidVal,
+        notes: inputSalaryRemarks.trim() || `${inputSalaryMonth} ${inputSalaryYear} salary payment processed`,
+        date: inputSalaryDate,
+        paymentMethod: inputSalaryMethod,
+        handledBy: inputSalaryHandledBy
+      })
 
-    await loadData()
-    setActiveDialog(null)
-    setInputSalaryAmount("")
-    setInputSalaryPaid("")
-    setInputSalaryRemarks("")
-    setInputSalaryHandledBy("")
+      await loadData()
+      setActiveDialog(null)
+      setInputSalaryAmount("")
+      setInputSalaryPaid("")
+      setInputSalaryRemarks("")
+      setInputSalaryHandledBy("")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -648,7 +667,9 @@ export default function EmployeeDetailsPage({ params }: Props) {
               </div>
               <div className="flex gap-3 mt-4">
                 <button type="button" onClick={() => setActiveDialog(null)} className="flex-1 rounded-2xl bg-secondary py-3 text-xs font-bold text-secondary-foreground transition-all active:scale-95">Cancel</button>
-                <button type="submit" className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all active:scale-95 hover:opacity-95">Save Changes</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 rounded-2xl bg-primary py-3 text-xs font-bold text-primary-foreground transition-all active:scale-95 hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isSubmitting ? "Saving..." : "Save Changes"}
+                </button>
               </div>
             </form>
           </div>
@@ -729,7 +750,9 @@ export default function EmployeeDetailsPage({ params }: Props) {
               </div>
               <div className="flex gap-3 mt-4">
                 <button type="button" onClick={() => setActiveDialog(null)} className="flex-1 rounded-2xl bg-secondary py-3 text-xs font-bold text-secondary-foreground transition-all active:scale-95">Cancel</button>
-                <button type="submit" className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all active:scale-95 hover:opacity-95">Save Advance</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 rounded-2xl bg-[#ea580c] py-3 text-xs font-bold text-white transition-all active:scale-95 hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isSubmitting ? "Saving..." : "Save Advance"}
+                </button>
               </div>
             </form>
           </div>
@@ -847,7 +870,9 @@ export default function EmployeeDetailsPage({ params }: Props) {
               </div>
               <div className="flex gap-3 mt-4">
                 <button type="button" onClick={() => setActiveDialog(null)} className="flex-1 rounded-2xl bg-secondary py-3 text-xs font-bold text-secondary-foreground transition-all active:scale-95">Cancel</button>
-                <button type="submit" className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all active:scale-95 hover:opacity-95">Record Wage</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 rounded-2xl bg-[#16a34a] py-3 text-xs font-bold text-white transition-all active:scale-95 hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isSubmitting ? "Recording..." : "Record Wage"}
+                </button>
               </div>
             </form>
           </div>

@@ -206,6 +206,7 @@ export default function PartnersPage() {
   // Handle Capital Transaction Submission
   const handleSaveCapitalTx = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (actionLoading) return
     if (!capPartnerId || !capAmount || parseFloat(capAmount) <= 0) {
       alert("Please enter a valid amount and select a partner.")
       return
@@ -243,6 +244,7 @@ export default function PartnersPage() {
   // Handle New Partner Creation
   const handleSaveNewPartner = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (actionLoading) return
     if (!newPartnerName.trim()) {
       alert("Please enter partner name.")
       return
