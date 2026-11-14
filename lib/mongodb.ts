@@ -12,8 +12,6 @@ const options: MongoClientOptions = {
 declare global {
   // eslint-disable-next-line no-var
   var _mongoClientPromise: Promise<MongoClient> | undefined
-  // eslint-disable-next-line no-var
-  var _mongoIndexesInitialized: boolean | undefined
 }
 
 /**
@@ -40,52 +38,11 @@ export async function getMongoClient(): Promise<MongoClient> {
 }
 
 /**
- * Ensures indexes exist on frequently queried fields for high performance
- */
-async function ensureIndexes(db: Db) {
-  if (global._mongoIndexesInitialized) return
-  global._mongoIndexesInitialized = true
-
-  try {
-    await Promise.all([
-      db.collection('users').createIndex({ username: 1 }, { unique: true }).catch(() => {}),
-      db.collection('employees').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('employees').createIndex({ status: 1 }).catch(() => {}),
-      db.collection('seths').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('seths').createIndex({ seth_name: 1 }).catch(() => {}),
-      db.collection('seth_payments').createIndex({ seth_id: 1, payment_date: -1 }).catch(() => {}),
-      db.collection('rolls').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('rolls').createIndex({ seth_id: 1, status: 1 }).catch(() => {}),
-      db.collection('cutting_entries').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('cutting_entries').createIndex({ roll_id: 1 }).catch(() => {}),
-      db.collection('finished_goods').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('finished_goods').createIndex({ lot_no: 1 }).catch(() => {}),
-      db.collection('salaries').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('salaries').createIndex({ employee_id: 1, payment_date: -1 }).catch(() => {}),
-      db.collection('upad_records').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('upad_records').createIndex({ employee_id: 1, status: 1 }).catch(() => {}),
-      db.collection('incomes').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('incomes').createIndex({ income_date: -1 }).catch(() => {}),
-      db.collection('expenses').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('expenses').createIndex({ expense_date: -1 }).catch(() => {}),
-      db.collection('cash_book_ledger').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('cash_book_ledger').createIndex({ entry_date: -1 }).catch(() => {}),
-      db.collection('partners').createIndex({ id: 1 }, { unique: true }).catch(() => {}),
-      db.collection('partner_transactions').createIndex({ partner_id: 1, transaction_date: -1 }).catch(() => {})
-    ])
-  } catch {
-    // Indexes creation failure should not block requests
-  }
-}
-
-/**
  * Returns the MongoDB Database instance (defaults to rd_jeans_factory)
  */
 export async function getMongoDb(dbName: string = defaultDbName): Promise<Db> {
   const clientInstance = await getMongoClient()
-  const db = clientInstance.db(dbName)
-  ensureIndexes(db).catch(() => {})
-  return db
+  return clientInstance.db(dbName)
 }
 
 /**
