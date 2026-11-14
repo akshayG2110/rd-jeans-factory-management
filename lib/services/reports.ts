@@ -1,4 +1,4 @@
-import { query } from '../db'
+import { getMongoDb } from '../mongodb'
 import ExcelJS from 'exceljs'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -21,8 +21,7 @@ export class ReportService {
    * Fetches structured report rows for any of the 12 business categories with all applied filters.
    */
   static async exportData(category: string, filters: ReportFilterParams = {}) {
-    let sql = ''
-    const params: any[] = []
+    const db = await getMongoDb()
     const cat = (category || 'cashbook').toLowerCase().trim()
 
     const {
@@ -40,375 +39,302 @@ export class ReportService {
 
     switch (cat) {
       case 'employees': {
-        sql = `SELECT id, employee_name, role, to_char(joining_date, 'YYYY-MM-DD') as joining_date, status, to_char(created_at, 'YYYY-MM-DD') as created_at FROM employees WHERE 1=1`
-        if (status) {
-          params.push(status)
-          sql += ` AND status = $${params.length}`
-        }
-        sql += ' ORDER BY id ASC'
-        break
+        const query: any = {}
+        if (status) query.status = status
+        const list = await db.collection('employees').find(query).sort({ id: 1 }).toArray()
+        return list.map(e => ({
+          id: e.id,
+          employee_name: e.employee_name,
+          role: e.role,
+          joining_date: e.joining_date,
+          status: e.status,
+          created_at: String(e.created_at || '').slice(0, 10)
+        }))
       }
 
       case 'salary': {
-        sql = `
-          SELECT 
-            s.id, 
-            to_char(s.payment_date, 'YYYY-MM-DD') as payment_date, 
-            e.employee_name, 
-            (s.salary_month || '/' || s.salary_year) as period, 
-            s.salary_amount, 
-            s.total_upad_deducted, 
-            s.net_payable, 
-            s.paid_amount, 
-            s.remaining_amount, 
-            s.payment_method, 
-            s.handled_by, 
-            s.notes 
-          FROM salaries s 
-          LEFT JOIN employees e ON s.employee_id = e.id 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND s.payment_date >= $${params.length}`
+        const query: any = {}
+        if (employee_id) query.employee_id = Number(employee_id)
+        if (handled_by) query.handled_by = { $regex: handled_by, $options: 'i' }
+        if (date_from || date_to) {
+          query.payment_date = {}
+          if (date_from) query.payment_date.$gte = date_from
+          if (date_to) query.payment_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND s.payment_date <= $${params.length}`
-        }
-        if (employee_id) {
-          params.push(parseInt(employee_id, 10))
-          sql += ` AND s.employee_id = $${params.length}`
-        }
-        if (handled_by) {
-          params.push(handled_by)
-          sql += ` AND s.handled_by ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY s.payment_date DESC, s.id DESC'
-        break
+        const salaries = await db.collection('salaries').find(query).sort({ payment_date: -1, id: -1 }).toArray()
+        const employees = await db.collection('employees').find({}).toArray()
+        const empMap = new Map(employees.map(e => [e.id, e.employee_name]))
+
+        return salaries.map(s => ({
+          id: s.id,
+          payment_date: s.payment_date,
+          employee_name: empMap.get(s.employee_id) || '',
+          period: `${s.salary_month}/${s.salary_year}`,
+          salary_amount: s.salary_amount,
+          total_upad_deducted: s.total_upad_deducted,
+          net_payable: s.net_payable,
+          paid_amount: s.paid_amount,
+          remaining_amount: s.remaining_amount,
+          payment_method: s.payment_method,
+          handled_by: s.handled_by,
+          notes: s.notes || '-'
+        }))
       }
 
       case 'upad': {
-        sql = `
-          SELECT 
-            u.id, 
-            to_char(u.date, 'YYYY-MM-DD') as date, 
-            e.employee_name, 
-            u.amount, 
-            u.payment_method, 
-            u.handled_by, 
-            u.status, 
-            u.settled_in_salary_id, 
-            to_char(u.settled_at, 'YYYY-MM-DD') as settled_date, 
-            u.notes 
-          FROM upad_records u 
-          LEFT JOIN employees e ON u.employee_id = e.id 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND u.date >= $${params.length}`
+        const query: any = {}
+        if (employee_id) query.employee_id = Number(employee_id)
+        if (handled_by) query.handled_by = { $regex: handled_by, $options: 'i' }
+        if (status) query.status = status
+        if (date_from || date_to) {
+          query.date = {}
+          if (date_from) query.date.$gte = date_from
+          if (date_to) query.date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND u.date <= $${params.length}`
-        }
-        if (employee_id) {
-          params.push(parseInt(employee_id, 10))
-          sql += ` AND u.employee_id = $${params.length}`
-        }
-        if (handled_by) {
-          params.push(handled_by)
-          sql += ` AND u.handled_by ILIKE $${params.length}`
-        }
-        if (status) {
-          params.push(status)
-          sql += ` AND u.status = $${params.length}`
-        }
-        sql += ' ORDER BY u.date DESC, u.id DESC'
-        break
+        const upads = await db.collection('upad_records').find(query).sort({ date: -1, id: -1 }).toArray()
+        const employees = await db.collection('employees').find({}).toArray()
+        const empMap = new Map(employees.map(e => [e.id, e.employee_name]))
+
+        return upads.map(u => ({
+          id: u.id,
+          date: u.date,
+          employee_name: empMap.get(u.employee_id) || '',
+          amount: u.amount,
+          payment_method: u.payment_method,
+          handled_by: u.handled_by,
+          status: u.status,
+          settled_in_salary_id: u.settled_in_salary_id || '-',
+          settled_date: u.settled_at ? String(u.settled_at).slice(0, 10) : '-',
+          notes: u.notes || '-'
+        }))
       }
 
       case 'seths': {
-        sql = `
-          SELECT 
-            s.id, 
-            s.seth_name, 
-            s.mobile_number, 
-            s.address, 
-            s.status, 
-            COALESCE(COUNT(DISTINCT r.id), 0) as total_rolls, 
-            COALESCE(SUM(r.received_meter), 0) as total_meters_received, 
-            s.notes 
-          FROM seths s 
-          LEFT JOIN rolls r ON s.id = r.seth_id 
-          WHERE 1=1
-        `
-        if (status) {
-          params.push(status)
-          sql += ` AND s.status = $${params.length}`
-        }
-        if (seth_id) {
-          params.push(parseInt(seth_id, 10))
-          sql += ` AND s.id = $${params.length}`
-        }
-        sql += ' GROUP BY s.id, s.seth_name, s.mobile_number, s.address, s.status, s.notes ORDER BY s.id ASC'
-        break
+        const query: any = {}
+        if (status) query.status = status
+        if (seth_id) query.id = Number(seth_id)
+        const seths = await db.collection('seths').find(query).sort({ id: 1 }).toArray()
+        const rolls = await db.collection('rolls').find({}).toArray()
+
+        return seths.map(s => {
+          const sRolls = rolls.filter(r => r.seth_id === s.id)
+          const totalMeters = sRolls.reduce((sum, r) => sum + (Number(r.received_meter) || 0), 0)
+          return {
+            id: s.id,
+            seth_name: s.seth_name,
+            mobile_number: s.mobile_number || '-',
+            address: s.address || '-',
+            status: s.status,
+            total_rolls: sRolls.length,
+            total_meters_received: totalMeters,
+            notes: s.notes || '-'
+          }
+        })
       }
 
       case 'fabric':
       case 'rolls': {
-        sql = `
-          SELECT 
-            r.id, 
-            to_char(r.entry_date, 'YYYY-MM-DD') as entry_date, 
-            s.seth_name, 
-            r.roll_number, 
-            r.short_number, 
-            r.fabric_type, 
-            r.received_meter, 
-            r.used_meter, 
-            r.remaining_meter, 
-            r.status, 
-            r.notes 
-          FROM rolls r 
-          LEFT JOIN seths s ON r.seth_id = s.id 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND r.entry_date >= $${params.length}`
+        const query: any = {}
+        if (seth_id) query.seth_id = Number(seth_id)
+        if (status) query.status = status
+        if (roll_number) query.roll_number = { $regex: roll_number, $options: 'i' }
+        if (date_from || date_to) {
+          query.entry_date = {}
+          if (date_from) query.entry_date.$gte = date_from
+          if (date_to) query.entry_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND r.entry_date <= $${params.length}`
-        }
-        if (seth_id) {
-          params.push(parseInt(seth_id, 10))
-          sql += ` AND r.seth_id = $${params.length}`
-        }
-        if (status) {
-          params.push(status)
-          sql += ` AND r.status = $${params.length}`
-        }
-        if (roll_number) {
-          params.push(`%${roll_number}%`)
-          sql += ` AND r.roll_number ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY r.entry_date DESC, r.id DESC'
-        break
+        const rolls = await db.collection('rolls').find(query).sort({ entry_date: -1, id: -1 }).toArray()
+        const seths = await db.collection('seths').find({}).toArray()
+        const sethMap = new Map(seths.map(s => [s.id, s.seth_name]))
+
+        return rolls.map(r => ({
+          id: r.id,
+          entry_date: r.entry_date,
+          seth_name: sethMap.get(r.seth_id) || '',
+          roll_number: r.roll_number,
+          short_number: r.short_number,
+          fabric_type: r.fabric_type,
+          received_meter: r.received_meter,
+          used_meter: r.used_meter,
+          remaining_meter: r.remaining_meter,
+          status: r.status,
+          notes: r.notes || '-'
+        }))
       }
 
       case 'cutting': {
-        sql = `
-          SELECT 
-            c.id, 
-            to_char(c.cutting_date, 'YYYY-MM-DD') as cutting_date, 
-            c.lot_number, 
-            COALESCE(e.employee_name, 'Unassigned') as worker_name, 
-            s.seth_name, 
-            r.roll_number, 
-            r.fabric_type, 
-            c.meter_used, 
-            c.piece_count, 
-            c.size, 
-            c.average, 
-            c.sort_number, 
-            c.notes 
-          FROM cutting_entries c 
-          LEFT JOIN rolls r ON c.roll_id = r.id 
-          LEFT JOIN seths s ON r.seth_id = s.id 
-          LEFT JOIN employees e ON c.employee_id = e.id 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND c.cutting_date >= $${params.length}`
+        const query: any = {}
+        if (employee_id) query.employee_id = Number(employee_id)
+        if (lot_number) query.lot_number = { $regex: lot_number, $options: 'i' }
+        if (date_from || date_to) {
+          query.cutting_date = {}
+          if (date_from) query.cutting_date.$gte = date_from
+          if (date_to) query.cutting_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND c.cutting_date <= $${params.length}`
-        }
-        if (employee_id) {
-          params.push(parseInt(employee_id, 10))
-          sql += ` AND c.employee_id = $${params.length}`
-        }
-        if (seth_id) {
-          params.push(parseInt(seth_id, 10))
-          sql += ` AND r.seth_id = $${params.length}`
-        }
-        if (lot_number) {
-          params.push(`%${lot_number}%`)
-          sql += ` AND c.lot_number ILIKE $${params.length}`
-        }
-        if (roll_number) {
-          params.push(`%${roll_number}%`)
-          sql += ` AND r.roll_number ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY c.cutting_date DESC, c.id DESC'
-        break
+        const cuts = await db.collection('cutting_entries').find(query).sort({ cutting_date: -1, id: -1 }).toArray()
+        const rolls = await db.collection('rolls').find({}).toArray()
+        const seths = await db.collection('seths').find({}).toArray()
+        const employees = await db.collection('employees').find({}).toArray()
+
+        const rollMap = new Map(rolls.map(r => [r.id, r]))
+        const sethMap = new Map(seths.map(s => [s.id, s.seth_name]))
+        const empMap = new Map(employees.map(e => [e.id, e.employee_name]))
+
+        return cuts.map(c => {
+          const roll = rollMap.get(c.roll_id)
+          return {
+            id: c.id,
+            cutting_date: c.cutting_date,
+            lot_number: c.lot_number,
+            worker_name: c.employee_id ? empMap.get(c.employee_id) || 'Unassigned' : 'Unassigned',
+            seth_name: roll ? sethMap.get(roll.seth_id) || '' : '',
+            roll_number: roll?.roll_number || '',
+            fabric_type: roll?.fabric_type || '',
+            meter_used: c.meter_used,
+            piece_count: c.piece_count,
+            size: c.size,
+            average: c.average || '-',
+            sort_number: c.sort_number || '-',
+            notes: c.notes || '-'
+          }
+        })
       }
 
       case 'income': {
-        sql = `
-          SELECT 
-            id, 
-            to_char(income_date, 'YYYY-MM-DD') as date, 
-            income_source as source, 
-            source_name, 
-            amount, 
-            payment_method, 
-            handled_by, 
-            reference_number as ref_no, 
-            notes 
-          FROM incomes 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND income_date >= $${params.length}`
+        const query: any = {}
+        if (income_source) query.income_source = income_source
+        if (handled_by) query.handled_by = { $regex: handled_by, $options: 'i' }
+        if (date_from || date_to) {
+          query.income_date = {}
+          if (date_from) query.income_date.$gte = date_from
+          if (date_to) query.income_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND income_date <= $${params.length}`
-        }
-        if (income_source) {
-          params.push(income_source)
-          sql += ` AND income_source = $${params.length}`
-        }
-        if (handled_by) {
-          params.push(handled_by)
-          sql += ` AND handled_by ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY income_date DESC, id DESC'
-        break
+        const incomes = await db.collection('incomes').find(query).sort({ income_date: -1, id: -1 }).toArray()
+        return incomes.map(i => ({
+          id: i.id,
+          date: i.income_date,
+          source: i.income_source,
+          source_name: i.source_name,
+          amount: i.amount,
+          payment_method: i.payment_method,
+          handled_by: i.handled_by,
+          ref_no: i.reference_number || '-',
+          notes: i.notes || '-'
+        }))
       }
 
       case 'expense':
       case 'expenses': {
-        sql = `
-          SELECT 
-            id, 
-            to_char(expense_date, 'YYYY-MM-DD') as date, 
-            expense_category as category, 
-            party_name, 
-            amount, 
-            payment_method, 
-            handled_by, 
-            reference_number as ref_no, 
-            notes 
-          FROM expenses 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND expense_date >= $${params.length}`
+        const query: any = {}
+        if (expense_category) query.expense_category = expense_category
+        if (handled_by) query.handled_by = { $regex: handled_by, $options: 'i' }
+        if (date_from || date_to) {
+          query.expense_date = {}
+          if (date_from) query.expense_date.$gte = date_from
+          if (date_to) query.expense_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND expense_date <= $${params.length}`
-        }
-        if (expense_category) {
-          params.push(expense_category)
-          sql += ` AND expense_category = $${params.length}`
-        }
-        if (handled_by) {
-          params.push(handled_by)
-          sql += ` AND handled_by ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY expense_date DESC, id DESC'
-        break
+        const expenses = await db.collection('expenses').find(query).sort({ expense_date: -1, id: -1 }).toArray()
+        return expenses.map(e => ({
+          id: e.id,
+          date: e.expense_date,
+          category: e.expense_category,
+          party_name: e.party_name,
+          amount: e.amount,
+          payment_method: e.payment_method,
+          handled_by: e.handled_by,
+          ref_no: e.reference_number || '-',
+          notes: e.notes || '-'
+        }))
       }
 
       case 'cashbook': {
-        sql = `
-          SELECT 
-            id, 
-            to_char(transaction_date, 'YYYY-MM-DD') as date, 
-            transaction_type as type, 
-            name as party_name, 
-            payment_method, 
-            handled_by, 
-            income_amount as income, 
-            out_amount as out, 
-            running_balance as balance, 
-            reference_module, 
-            notes 
-          FROM cash_book_ledger 
-          WHERE 1=1
-        `
-        if (date_from) {
-          params.push(date_from)
-          sql += ` AND transaction_date >= $${params.length}`
+        const query: any = {}
+        if (handled_by) query.handled_by = { $regex: handled_by, $options: 'i' }
+        if (date_from || date_to) {
+          query.transaction_date = {}
+          if (date_from) query.transaction_date.$gte = date_from
+          if (date_to) query.transaction_date.$lte = date_to
         }
-        if (date_to) {
-          params.push(date_to)
-          sql += ` AND transaction_date <= $${params.length}`
-        }
-        if (handled_by) {
-          params.push(handled_by)
-          sql += ` AND handled_by ILIKE $${params.length}`
-        }
-        sql += ' ORDER BY transaction_date DESC, id DESC'
-        break
+        const records = await db.collection('cash_book_ledger').find(query).sort({ transaction_date: -1, id: -1 }).toArray()
+        return records.map(c => ({
+          id: c.id,
+          date: c.transaction_date,
+          type: c.transaction_type,
+          party_name: c.name,
+          payment_method: c.payment_method,
+          handled_by: c.handled_by,
+          income: c.income_amount,
+          out: c.out_amount,
+          balance: c.running_balance,
+          reference_module: c.reference_module,
+          notes: c.notes || '-'
+        }))
       }
 
       case 'partners': {
-        sql = `
-          SELECT 
-            p.id, 
-            p.name as partner_name, 
-            p.mobile_number, 
-            p.profit_share_percentage, 
-            p.opening_balance, 
-            p.current_balance as equity_balance, 
-            COALESCE(SUM(CASE WHEN pt.transaction_type IN ('Capital Investment', 'Investment') THEN pt.amount ELSE 0 END), 0) as total_invested,
-            COALESCE(SUM(CASE WHEN pt.transaction_type IN ('Drawing (Personal Withdrawal)', 'Withdrawal') THEN pt.amount ELSE 0 END), 0) as total_drawings,
-            p.status, 
-            p.notes 
-          FROM partners p 
-          LEFT JOIN partner_transactions pt ON p.id = pt.partner_id 
-          WHERE 1=1
-        `
-        if (status) {
-          params.push(status)
-          sql += ` AND p.status = $${params.length}`
-        }
-        sql += ' GROUP BY p.id, p.name, p.mobile_number, p.profit_share_percentage, p.opening_balance, p.current_balance, p.status, p.notes ORDER BY p.id ASC'
-        break
+        const query: any = {}
+        if (status) query.status = status
+        const partners = await db.collection('partners').find(query).sort({ id: 1 }).toArray()
+        const txs = await db.collection('partner_transactions').find({}).toArray()
+
+        return partners.map(p => {
+          const pTx = txs.filter(t => t.partner_id === p.id)
+          let invested = 0
+          let drawings = 0
+          for (const t of pTx) {
+            const amt = Number(t.amount) || 0
+            if (t.transaction_type === 'Capital Investment' || t.transaction_type === 'Investment') invested += amt
+            if (t.transaction_type === 'Drawing (Personal Withdrawal)' || t.transaction_type === 'Withdrawal') drawings += amt
+          }
+          return {
+            id: p.id,
+            partner_name: p.name,
+            mobile_number: p.mobile_number || '-',
+            profit_share_percentage: p.profit_share_percentage,
+            opening_balance: p.opening_balance,
+            equity_balance: p.current_balance,
+            total_invested: invested,
+            total_drawings: drawings,
+            status: p.status,
+            notes: p.notes || '-'
+          }
+        })
       }
 
       case 'factory-summary': {
-        // Executive factory summary across key domains
-        const [empStats, rollStats, cuttingStats, cashStats, partnerStats] = await Promise.all([
-          query(`SELECT COUNT(*) as total_employees, COUNT(*) FILTER (WHERE status = 'Active') as active_employees FROM employees`),
-          query(`SELECT COUNT(*) as total_rolls, COALESCE(SUM(received_meter), 0) as total_received_m, COALESCE(SUM(remaining_meter), 0) as in_stock_m FROM rolls`),
-          query(`SELECT COUNT(*) as total_lots, COALESCE(SUM(piece_count), 0) as total_pieces FROM cutting_entries`),
-          query(`SELECT COALESCE(SUM(income_amount), 0) as total_inflows, COALESCE(SUM(out_amount), 0) as total_outflows FROM cash_book_ledger`),
-          query(`SELECT COUNT(*) as total_partners, COALESCE(SUM(current_balance), 0) as total_partner_equity FROM partners`)
+        const [employees, rolls, cuts, cash, partners] = await Promise.all([
+          db.collection('employees').find({}).toArray(),
+          db.collection('rolls').find({}).toArray(),
+          db.collection('cutting_entries').find({}).toArray(),
+          db.collection('cash_book_ledger').find({}).sort({ transaction_date: -1, id: -1 }).toArray(),
+          db.collection('partners').find({}).toArray()
         ])
 
-        const latestBalRes = await query(`SELECT running_balance FROM cash_book_ledger ORDER BY transaction_date DESC, id DESC LIMIT 1`)
-        const currentCashBal = latestBalRes.rows.length > 0 ? parseFloat(latestBalRes.rows[0].running_balance) : 0
+        const activeEmployees = employees.filter(e => e.status === 'Active').length
+        const totalReceivedM = rolls.reduce((sum, r) => sum + (Number(r.received_meter) || 0), 0)
+        const inStockM = rolls.reduce((sum, r) => sum + (Number(r.remaining_meter) || 0), 0)
+        const totalPieces = cuts.reduce((sum, c) => sum + (Number(c.piece_count) || 0), 0)
+        const totalInflows = cash.reduce((sum, c) => sum + (Number(c.income_amount) || 0), 0)
+        const totalOutflows = cash.reduce((sum, c) => sum + (Number(c.out_amount) || 0), 0)
+        const currentCashBal = cash.length > 0 ? Number(cash[0].running_balance || 0) : 0
+        const totalPartnerEquity = partners.reduce((sum, p) => sum + (Number(p.current_balance) || 0), 0)
 
         return [
-          { metric: 'Total Employees', value: empStats.rows[0].total_employees, details: `${empStats.rows[0].active_employees} Active` },
-          { metric: 'Fabric Rolls In Warehouse', value: rollStats.rows[0].total_rolls, details: `${rollStats.rows[0].in_stock_m} Meters Remaining` },
-          { metric: 'Cutting Production', value: `${cuttingStats.rows[0].total_pieces} Pieces`, details: `${cuttingStats.rows[0].total_lots} Lots Cut` },
-          { metric: 'Cashbook Inflows', value: `₹${parseFloat(cashStats.rows[0].total_inflows).toLocaleString('en-IN')}`, details: 'Total Company Cash In' },
-          { metric: 'Cashbook Outflows', value: `₹${parseFloat(cashStats.rows[0].total_outflows).toLocaleString('en-IN')}`, details: 'Total Company Cash Out' },
+          { metric: 'Total Employees', value: employees.length, details: `${activeEmployees} Active` },
+          { metric: 'Fabric Rolls In Warehouse', value: rolls.length, details: `${inStockM} Meters Remaining (Total ${totalReceivedM}m)` },
+          { metric: 'Cutting Production', value: `${totalPieces} Pieces`, details: `${cuts.length} Lots Cut` },
+          { metric: 'Cashbook Inflows', value: `₹${totalInflows.toLocaleString('en-IN')}`, details: 'Total Company Cash In' },
+          { metric: 'Cashbook Outflows', value: `₹${totalOutflows.toLocaleString('en-IN')}`, details: 'Total Company Cash Out' },
           { metric: 'Current Factory Cash Balance', value: `₹${currentCashBal.toLocaleString('en-IN')}`, details: 'Grand Cash Desk Balance' },
-          { metric: 'Partner Capital Equity', value: `₹${parseFloat(partnerStats.rows[0].total_partner_equity).toLocaleString('en-IN')}`, details: `${partnerStats.rows[0].total_partners} Partners Total` }
+          { metric: 'Partner Capital Equity', value: `₹${totalPartnerEquity.toLocaleString('en-IN')}`, details: `${partners.length} Partners Total` }
         ]
       }
 
       default: {
-        sql = 'SELECT * FROM cash_book_ledger ORDER BY transaction_date DESC, id DESC LIMIT 100'
+        const list = await db.collection('cash_book_ledger').find({}).sort({ transaction_date: -1, id: -1 }).limit(100).toArray()
+        return list.map(({ _id, ...rest }) => rest)
       }
     }
-
-    const res = await query(sql, params)
-    return res.rows
   }
 
   /**
@@ -471,7 +397,7 @@ export class ReportService {
     headerRow.height = 26
 
     // Data Rows
-    data.forEach((rowObj, index) => {
+    data.forEach((rowObj: any, index: number) => {
       const rowIndex = 5 + index
       const row = worksheet.getRow(rowIndex)
       row.values = keys.map(k => {
@@ -565,7 +491,7 @@ export class ReportService {
     // Prepare table columns and rows
     const keys = Object.keys(data[0])
     const headers = [keys.map(k => k.replace(/_/g, ' ').toUpperCase())]
-    const rows = data.map(item => keys.map(k => {
+    const rows = data.map((item: any) => keys.map(k => {
       const val = item[k]
       if (val === null || val === undefined) return '-'
       if (typeof val === 'number') {
@@ -598,8 +524,7 @@ export class ReportService {
       alternateRowStyles: {
         fillColor: [248, 250, 252]
       },
-      didDrawPage: (dataObj) => {
-        // Page footer
+      didDrawPage: () => {
         const pageNum = doc.internal.pages.length - 1
         doc.setFontSize(8)
         doc.setTextColor(148, 163, 184)

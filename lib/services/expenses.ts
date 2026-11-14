@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 import { CashBookService } from './cashbook'
 
 export interface ExpenseRecord {
@@ -24,42 +24,37 @@ export class ExpenseService {
     date_to?: string
     search?: string
   }) {
-    let sql = 'SELECT * FROM expenses WHERE 1=1'
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
-    if (filters.expense_category) {
-      params.push(filters.expense_category)
-      sql += ` AND expense_category = $${params.length}`
+    if (filters.expense_category) queryFilter.expense_category = filters.expense_category
+    if (filters.payment_method) queryFilter.payment_method = filters.payment_method
+    if (filters.handled_by) queryFilter.handled_by = filters.handled_by
+
+    if (filters.date_from || filters.date_to) {
+      queryFilter.expense_date = {}
+      if (filters.date_from) queryFilter.expense_date.$gte = filters.date_from
+      if (filters.date_to) queryFilter.expense_date.$lte = filters.date_to
     }
-    if (filters.payment_method) {
-      params.push(filters.payment_method)
-      sql += ` AND payment_method = $${params.length}`
-    }
-    if (filters.handled_by) {
-      params.push(filters.handled_by)
-      sql += ` AND handled_by = $${params.length}`
-    }
-    if (filters.date_from) {
-      params.push(filters.date_from)
-      sql += ` AND expense_date >= $${params.length}`
-    }
-    if (filters.date_to) {
-      params.push(filters.date_to)
-      sql += ` AND expense_date <= $${params.length}`
-    }
+
     if (filters.search) {
-      params.push(`%${filters.search}%`)
-      sql += ` AND (party_name ILIKE $${params.length} OR notes ILIKE $${params.length} OR reference_number ILIKE $${params.length})`
+      queryFilter.$or = [
+        { party_name: { $regex: filters.search, $options: 'i' } },
+        { notes: { $regex: filters.search, $options: 'i' } },
+        { reference_number: { $regex: filters.search, $options: 'i' } }
+      ]
     }
 
-    sql += ' ORDER BY expense_date DESC, id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const records = await db.collection('expenses').find(queryFilter).sort({ expense_date: -1, id: -1 }).toArray()
+    return records.map(({ _id, ...rest }) => rest)
   }
 
   static async getById(id: number) {
-    const res = await query('SELECT * FROM expenses WHERE id = $1', [id])
-    return res.rows[0] || null
+    const db = await getMongoDb()
+    const record = await db.collection('expenses').findOne({ id: Number(id) })
+    if (!record) return null
+    const { _id, ...rest } = record
+    return rest
   }
 
   static async create(data: {
@@ -72,50 +67,42 @@ export class ExpenseService {
     reference_number?: string | null
     notes?: string | null
   }) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
-
-      const expRes = await client.query(
-        `INSERT INTO expenses (expense_date, expense_category, party_name, amount, payment_method, handled_by, reference_number, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *`,
-        [
-          data.expense_date,
-          data.expense_category,
-          data.party_name,
-          data.amount,
-          data.payment_method,
-          data.handled_by,
-          data.reference_number || null,
-          data.notes || null
-        ]
-      )
-      const expense = expRes.rows[0]
-
-      await CashBookService.logTransaction(
-        expense.expense_date,
-        expense.expense_category,
-        expense.party_name,
-        expense.payment_method,
-        0,
-        parseFloat(expense.amount),
-        expense.handled_by,
-        'Expense',
-        expense.id,
-        expense.notes,
-        client,
-        { expense_id: expense.id }
-      )
-
-      await client.query('COMMIT')
-      return expense
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    const db = await getMongoDb()
+    const id = await getNextSequence('expenses')
+    const now = new Date().toISOString()
+    const expense = {
+      id,
+      expense_date: data.expense_date,
+      expense_category: data.expense_category,
+      party_name: data.party_name,
+      amount: Number(data.amount),
+      payment_method: data.payment_method,
+      handled_by: data.handled_by,
+      reference_number: data.reference_number || null,
+      notes: data.notes || null,
+      created_at: now,
+      updated_at: now
     }
+
+    await db.collection('expenses').insertOne(expense)
+
+    await CashBookService.logTransaction(
+      expense.expense_date,
+      expense.expense_category,
+      expense.party_name,
+      expense.payment_method,
+      0,
+      Number(expense.amount),
+      expense.handled_by,
+      'Expense',
+      expense.id,
+      expense.notes,
+      undefined,
+      { expense_id: expense.id }
+    )
+
+    const { _id, ...rest } = expense as any
+    return rest
   }
 
   static async update(
@@ -131,77 +118,62 @@ export class ExpenseService {
       notes: string | null
     }>
   ) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('expenses').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM expenses WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    const expense_date = data.expense_date !== undefined ? data.expense_date : existing.expense_date
+    const expense_category = data.expense_category !== undefined ? data.expense_category : existing.expense_category
+    const party_name = data.party_name !== undefined ? data.party_name : existing.party_name
+    const amount = data.amount !== undefined ? Number(data.amount) : Number(existing.amount)
+    const payment_method = data.payment_method !== undefined ? data.payment_method : existing.payment_method
+    const handled_by = data.handled_by !== undefined ? data.handled_by : existing.handled_by
+    const reference_number = data.reference_number !== undefined ? data.reference_number : existing.reference_number
+    const notes = data.notes !== undefined ? data.notes : existing.notes
 
-      const expense_date = data.expense_date !== undefined ? data.expense_date : existing.expense_date
-      const expense_category = data.expense_category !== undefined ? data.expense_category : existing.expense_category
-      const party_name = data.party_name !== undefined ? data.party_name : existing.party_name
-      const amount = data.amount !== undefined ? data.amount : parseFloat(existing.amount)
-      const payment_method = data.payment_method !== undefined ? data.payment_method : existing.payment_method
-      const handled_by = data.handled_by !== undefined ? data.handled_by : existing.handled_by
-      const reference_number = data.reference_number !== undefined ? data.reference_number : existing.reference_number
-      const notes = data.notes !== undefined ? data.notes : existing.notes
-
-      const updateRes = await client.query(
-        `UPDATE expenses
-         SET expense_date = $1, expense_category = $2, party_name = $3, amount = $4, 
-             payment_method = $5, handled_by = $6, reference_number = $7, notes = $8, updated_at = NOW()
-         WHERE id = $9
-         RETURNING *`,
-        [expense_date, expense_category, party_name, amount, payment_method, handled_by, reference_number, notes, id]
-      )
-      const updated = updateRes.rows[0]
-
-      await CashBookService.updateByReference(
-        'Expense',
-        id,
-        {
-          name: party_name,
+    await db.collection('expenses').updateOne(
+      { id: numId },
+      {
+        $set: {
+          expense_date,
+          expense_category,
+          party_name,
           amount,
-          paymentMethod: payment_method,
-          handledBy: handled_by,
-          transactionDate: expense_date,
+          payment_method,
+          handled_by,
+          reference_number,
           notes,
-          isIncome: false
-        },
-        client
-      )
+          updated_at: new Date().toISOString()
+        }
+      }
+    )
 
-      await client.query('COMMIT')
-      return updated
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
-    }
+    await CashBookService.updateByReference('Expense', numId, {
+      name: party_name,
+      amount,
+      paymentMethod: payment_method,
+      handledBy: handled_by,
+      transactionDate: expense_date,
+      notes,
+      isIncome: false
+    })
+
+    const updated = await db.collection('expenses').findOne({ id: numId })
+    const { _id, ...rest } = updated as any
+    return rest
   }
 
   static async delete(id: number) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('expenses').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM expenses WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    await db.collection('expenses').deleteOne({ id: numId })
+    await CashBookService.deleteByReference('Expense', numId)
 
-      await client.query('DELETE FROM expenses WHERE id = $1', [id])
-      await CashBookService.deleteByReference('Expense', id, client)
-
-      await client.query('COMMIT')
-      return existing
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
-    }
+    const { _id, ...rest } = existing
+    return rest
   }
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { query } from '@/lib/db'
+import { getMongoDb } from '@/lib/mongodb'
 import { verifyPassword, generateToken, ensureDefaultUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -14,8 +14,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, detail: 'Username and password are required' }, { status: 400 })
     }
 
-    const res = await query('SELECT * FROM users WHERE username = $1', [username])
-    const user = res.rows[0]
+    const db = await getMongoDb()
+    const user = await db.collection('users').findOne({ username })
 
     if (!user) {
       return NextResponse.json({ success: false, detail: 'Invalid username or password' }, { status: 401 })

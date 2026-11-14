@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 import { CashBookService } from './cashbook'
 import { EmployeeService } from './employees'
 
@@ -32,69 +32,58 @@ export class SalaryService {
     date_from?: string
     date_to?: string
   }) {
-    let sql = `
-      SELECT s.*, e.employee_name 
-      FROM salaries s
-      LEFT JOIN employees e ON s.employee_id = e.id
-      WHERE 1=1
-    `
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
-    if (filters.employee_id) {
-      params.push(filters.employee_id)
-      sql += ` AND s.employee_id = $${params.length}`
-    }
-    if (filters.salary_month) {
-      params.push(filters.salary_month)
-      sql += ` AND s.salary_month = $${params.length}`
-    }
-    if (filters.salary_year) {
-      params.push(filters.salary_year)
-      sql += ` AND s.salary_year = $${params.length}`
-    }
-    if (filters.payment_method) {
-      params.push(filters.payment_method)
-      sql += ` AND s.payment_method = $${params.length}`
-    }
-    if (filters.handled_by) {
-      params.push(filters.handled_by)
-      sql += ` AND s.handled_by = $${params.length}`
-    }
-    if (filters.date_from) {
-      params.push(filters.date_from)
-      sql += ` AND s.payment_date >= $${params.length}`
-    }
-    if (filters.date_to) {
-      params.push(filters.date_to)
-      sql += ` AND s.payment_date <= $${params.length}`
+    if (filters.employee_id) queryFilter.employee_id = Number(filters.employee_id)
+    if (filters.salary_month) queryFilter.salary_month = Number(filters.salary_month)
+    if (filters.salary_year) queryFilter.salary_year = Number(filters.salary_year)
+    if (filters.payment_method) queryFilter.payment_method = filters.payment_method
+    if (filters.handled_by) queryFilter.handled_by = filters.handled_by
+
+    if (filters.date_from || filters.date_to) {
+      queryFilter.payment_date = {}
+      if (filters.date_from) queryFilter.payment_date.$gte = filters.date_from
+      if (filters.date_to) queryFilter.payment_date.$lte = filters.date_to
     }
 
-    sql += ' ORDER BY s.payment_date DESC, s.id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const salaries = await db
+      .collection('salaries')
+      .find(queryFilter)
+      .sort({ payment_date: -1, id: -1 })
+      .toArray()
+
+    const employees = await db.collection('employees').find({}).toArray()
+    const empMap = new Map(employees.map(e => [e.id, e.employee_name]))
+
+    return salaries.map(s => {
+      const { _id, ...rest } = s
+      return {
+        ...rest,
+        employee_name: empMap.get(s.employee_id) || ''
+      }
+    })
   }
 
   static async getById(id: number) {
-    const res = await query(
-      `SELECT s.*, e.employee_name, e.role as employee_role
-       FROM salaries s
-       LEFT JOIN employees e ON s.employee_id = e.id
-       WHERE s.id = $1`,
-      [id]
-    )
-    if (!res.rows[0]) return null
-    const salary = res.rows[0]
+    const db = await getMongoDb()
+    const salary = await db.collection('salaries').findOne({ id: Number(id) })
+    if (!salary) return null
 
-    // Fetch settled upad advances physically linked to this salary
-    const upadsRes = await query(
-      `SELECT id, date, amount, payment_method, notes, handled_by, settled_at
-       FROM upad_records
-       WHERE settled_in_salary_id = $1
-       ORDER BY date ASC, id ASC`,
-      [id]
-    )
-    salary.settled_upads = upadsRes.rows
-    return salary
+    const emp = await db.collection('employees').findOne({ id: salary.employee_id })
+    const settledUpads = await db
+      .collection('upad_records')
+      .find({ settled_in_salary_id: Number(id) })
+      .sort({ date: 1, id: 1 })
+      .toArray()
+
+    const { _id, ...rest } = salary
+    return {
+      ...rest,
+      employee_name: emp?.employee_name || '',
+      employee_role: emp?.role || '',
+      settled_upads: settledUpads.map(({ _id, ...u }) => u)
+    }
   }
 
   static async create(data: {
@@ -110,113 +99,98 @@ export class SalaryService {
     deduct_upad?: boolean
     upad_ids?: number[]
   }) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numEmpId = Number(data.employee_id)
+    const emp = await db.collection('employees').findOne({ id: numEmpId })
+    if (!emp) {
+      throw new Error(`Employee with ID ${numEmpId} does not exist.`)
+    }
 
-      const empRes = await client.query('SELECT employee_name FROM employees WHERE id = $1', [data.employee_id])
-      if (empRes.rows.length === 0) {
-        throw new Error(`Employee with ID ${data.employee_id} does not exist.`)
+    // 1. Resolve pending Upad advances to deduct
+    let upadsToSettle: any[] = []
+    if (data.deduct_upad !== false) {
+      if (data.upad_ids && data.upad_ids.length > 0) {
+        const numUpadIds = data.upad_ids.map(Number)
+        upadsToSettle = await db
+          .collection('upad_records')
+          .find({ id: { $in: numUpadIds }, employee_id: numEmpId, status: 'Pending' })
+          .toArray()
+      } else {
+        upadsToSettle = await db
+          .collection('upad_records')
+          .find({ employee_id: numEmpId, status: 'Pending', date: { $lte: data.payment_date } })
+          .sort({ date: 1, id: 1 })
+          .toArray()
       }
-      const employeeName = empRes.rows[0].employee_name
+    }
 
-      // 1. Resolve pending Upad advances to deduct
-      let upadsToSettle: Array<{ id: number; amount: string | number }> = []
-      if (data.deduct_upad !== false) {
-        if (data.upad_ids && data.upad_ids.length > 0) {
-          const upadQ = await client.query(
-            `SELECT id, amount FROM upad_records 
-             WHERE id = ANY($1::int[]) AND employee_id = $2 AND status = 'Pending'`,
-            [data.upad_ids, data.employee_id]
-          )
-          upadsToSettle = upadQ.rows
-        } else {
-          // Auto-deduct all pending upads for this worker up to the salary payment date (or month end)
-          const upadQ = await client.query(
-            `SELECT id, amount FROM upad_records 
-             WHERE employee_id = $1 AND status = 'Pending' AND date <= $2
-             ORDER BY date ASC, id ASC`,
-            [data.employee_id, data.payment_date]
-          )
-          upadsToSettle = upadQ.rows
+    const totalUpadDeducted = upadsToSettle.reduce((sum, u) => sum + (Number(u.amount) || 0), 0)
+    const netPayable = Math.max(0, Number(data.salary_amount) - totalUpadDeducted)
+    const remainingAmount = Math.max(0, netPayable - Number(data.paid_amount))
+
+    const id = await getNextSequence('salaries')
+    const now = new Date().toISOString()
+    const salary = {
+      id,
+      employee_id: numEmpId,
+      salary_month: Number(data.salary_month),
+      salary_year: Number(data.salary_year),
+      salary_amount: Number(data.salary_amount),
+      total_upad_deducted: totalUpadDeducted,
+      net_payable: netPayable,
+      paid_amount: Number(data.paid_amount),
+      remaining_amount: remainingAmount,
+      payment_method: data.payment_method,
+      notes: data.notes || null,
+      handled_by: data.handled_by,
+      payment_date: data.payment_date,
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('salaries').insertOne(salary)
+
+    // Mark upads as settled
+    if (upadsToSettle.length > 0) {
+      const upadIds = upadsToSettle.map(u => u.id)
+      await db.collection('upad_records').updateMany(
+        { id: { $in: upadIds } },
+        {
+          $set: {
+            status: 'Settled',
+            settled_in_salary_id: salary.id,
+            settled_at: now,
+            updated_at: now
+          }
         }
-      }
-
-      // Calculate total advance deduction
-      const totalUpadDeducted = upadsToSettle.reduce(
-        (sum, u) => sum + parseFloat(String(u.amount || '0')),
-        0
       )
+    }
 
-      // Calculate net payable and remaining unpaid balance
-      const netPayable = Math.max(0, data.salary_amount - totalUpadDeducted)
-      const remainingAmount = Math.max(0, netPayable - data.paid_amount)
-
-      // 2. Insert salary settlement record
-      const salRes = await client.query(
-        `INSERT INTO salaries 
-         (employee_id, salary_month, salary_year, salary_amount, total_upad_deducted, net_payable, paid_amount, remaining_amount, payment_method, notes, handled_by, payment_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         RETURNING *`,
-        [
-          data.employee_id,
-          data.salary_month,
-          data.salary_year,
-          data.salary_amount,
-          totalUpadDeducted,
-          netPayable,
-          data.paid_amount,
-          remainingAmount,
-          data.payment_method,
-          data.notes || null,
-          data.handled_by,
-          data.payment_date
-        ]
+    // Cashbook transaction
+    if (Number(data.paid_amount) > 0) {
+      await CashBookService.logTransaction(
+        salary.payment_date,
+        'Salary',
+        emp.employee_name,
+        salary.payment_method,
+        0,
+        Number(salary.paid_amount),
+        salary.handled_by,
+        'Salary',
+        salary.id,
+        salary.notes,
+        undefined,
+        { salary_id: salary.id }
       )
-      const salary = salRes.rows[0]
+    }
 
-      // 3. Physically link and mark Upad advances as 'Settled'
-      if (upadsToSettle.length > 0) {
-        const upadIds = upadsToSettle.map(u => u.id)
-        await client.query(
-          `UPDATE upad_records
-           SET status = 'Settled', settled_in_salary_id = $1, settled_at = NOW(), updated_at = NOW()
-           WHERE id = ANY($2::int[])`,
-          [salary.id, upadIds]
-        )
-      }
-
-      // 4. Dual-entry log into CashBook if cash was disbursed
-      if (data.paid_amount > 0) {
-        await CashBookService.logTransaction(
-          salary.payment_date,
-          'Salary',
-          employeeName,
-          salary.payment_method,
-          0,
-          parseFloat(salary.paid_amount),
-          salary.handled_by,
-          'Salary',
-          salary.id,
-          salary.notes,
-          client,
-          { salary_id: salary.id }
-        )
-      }
-
-      await client.query('COMMIT')
-      return { 
-        ...salary, 
-        employee_name: employeeName, 
-        settled_upad_ids: upadsToSettle.map(u => u.id),
-        total_upad_deducted: totalUpadDeducted,
-        net_payable: netPayable
-      }
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    const { _id, ...rest } = salary as any
+    return {
+      ...rest,
+      employee_name: emp.employee_name,
+      settled_upad_ids: upadsToSettle.map(u => u.id),
+      total_upad_deducted: totalUpadDeducted,
+      net_payable: netPayable
     }
   }
 
@@ -234,43 +208,35 @@ export class SalaryService {
       payment_date: string
     }>
   ) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('salaries').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM salaries WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    const employeeId = data.employee_id !== undefined ? Number(data.employee_id) : existing.employee_id
+    const emp = await db.collection('employees').findOne({ id: employeeId })
+    if (!emp) {
+      throw new Error(`Employee with ID ${employeeId} does not exist.`)
+    }
 
-      const employeeId = data.employee_id !== undefined ? data.employee_id : existing.employee_id
-      const empRes = await client.query('SELECT employee_name FROM employees WHERE id = $1', [employeeId])
-      if (empRes.rows.length === 0) {
-        throw new Error(`Employee with ID ${employeeId} does not exist.`)
-      }
-      const employeeName = empRes.rows[0].employee_name
+    const salary_month = data.salary_month !== undefined ? Number(data.salary_month) : existing.salary_month
+    const salary_year = data.salary_year !== undefined ? Number(data.salary_year) : existing.salary_year
+    const salary_amount = data.salary_amount !== undefined ? Number(data.salary_amount) : Number(existing.salary_amount)
+    const total_upad_deducted = Number(existing.total_upad_deducted || 0)
+    const net_payable = Math.max(0, salary_amount - total_upad_deducted)
+    const paid_amount = data.paid_amount !== undefined ? Number(data.paid_amount) : Number(existing.paid_amount)
+    const remaining_amount = Math.max(0, net_payable - paid_amount)
 
-      const salary_month = data.salary_month !== undefined ? data.salary_month : existing.salary_month
-      const salary_year = data.salary_year !== undefined ? data.salary_year : existing.salary_year
-      const salary_amount = data.salary_amount !== undefined ? data.salary_amount : parseFloat(existing.salary_amount)
-      const total_upad_deducted = parseFloat(existing.total_upad_deducted || '0.00')
-      const net_payable = Math.max(0, salary_amount - total_upad_deducted)
-      const paid_amount = data.paid_amount !== undefined ? data.paid_amount : parseFloat(existing.paid_amount)
-      const remaining_amount = Math.max(0, net_payable - paid_amount)
+    const payment_method = data.payment_method !== undefined ? data.payment_method : existing.payment_method
+    const notes = data.notes !== undefined ? data.notes : existing.notes
+    const handled_by = data.handled_by !== undefined ? data.handled_by : existing.handled_by
+    const payment_date = data.payment_date !== undefined ? data.payment_date : existing.payment_date
 
-      const payment_method = data.payment_method !== undefined ? data.payment_method : existing.payment_method
-      const notes = data.notes !== undefined ? data.notes : existing.notes
-      const handled_by = data.handled_by !== undefined ? data.handled_by : existing.handled_by
-      const payment_date = data.payment_date !== undefined ? data.payment_date : existing.payment_date
-
-      const updateRes = await client.query(
-        `UPDATE salaries
-         SET employee_id = $1, salary_month = $2, salary_year = $3, salary_amount = $4, 
-             total_upad_deducted = $5, net_payable = $6, paid_amount = $7, remaining_amount = $8, 
-             payment_method = $9, notes = $10, handled_by = $11, payment_date = $12, updated_at = NOW()
-         WHERE id = $13
-         RETURNING *`,
-        [
-          employeeId,
+    await db.collection('salaries').updateOne(
+      { id: numId },
+      {
+        $set: {
+          employee_id: employeeId,
           salary_month,
           salary_year,
           salary_amount,
@@ -282,119 +248,106 @@ export class SalaryService {
           notes,
           handled_by,
           payment_date,
-          id
-        ]
-      )
-      const updated = updateRes.rows[0]
-
-      if (paid_amount > 0) {
-        const cashbookCheck = await client.query(
-          'SELECT id FROM cash_book_ledger WHERE reference_module ILIKE $1 AND reference_id = $2',
-          ['Salary', id]
-        )
-        if (cashbookCheck.rows.length > 0) {
-          await CashBookService.updateByReference(
-            'Salary',
-            id,
-            {
-              name: employeeName,
-              amount: paid_amount,
-              paymentMethod: payment_method,
-              handledBy: handled_by,
-              transactionDate: payment_date,
-              notes,
-              isIncome: false
-            },
-            client
-          )
-        } else {
-          await CashBookService.logTransaction(
-            payment_date,
-            'Salary',
-            employeeName,
-            payment_method,
-            0,
-            paid_amount,
-            handled_by,
-            'Salary',
-            id,
-            notes,
-            client,
-            { salary_id: id }
-          )
+          updated_at: new Date().toISOString()
         }
-      } else {
-        await CashBookService.deleteByReference('Salary', id, client)
       }
+    )
 
-      await client.query('COMMIT')
-      return { ...updated, employee_name: employeeName }
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    if (paid_amount > 0) {
+      const cashbookCheck = await db.collection('cash_book_ledger').findOne({
+        reference_module: { $regex: '^salary$', $options: 'i' },
+        reference_id: numId
+      })
+      if (cashbookCheck) {
+        await CashBookService.updateByReference('Salary', numId, {
+          name: emp.employee_name,
+          amount: paid_amount,
+          paymentMethod: payment_method,
+          handledBy: handled_by,
+          transactionDate: payment_date,
+          notes,
+          isIncome: false
+        })
+      } else {
+        await CashBookService.logTransaction(
+          payment_date,
+          'Salary',
+          emp.employee_name,
+          payment_method,
+          0,
+          paid_amount,
+          handled_by,
+          'Salary',
+          numId,
+          notes,
+          undefined,
+          { salary_id: numId }
+        )
+      }
+    } else {
+      await CashBookService.deleteByReference('Salary', numId)
     }
+
+    const updated = await db.collection('salaries').findOne({ id: numId })
+    const { _id, ...rest } = updated as any
+    return { ...rest, employee_name: emp.employee_name }
   }
 
   static async delete(id: number) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('salaries').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM salaries WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    // Automatically revert all linked Upad advances back to 'Pending'
+    await db.collection('upad_records').updateMany(
+      { settled_in_salary_id: numId },
+      {
+        $set: {
+          status: 'Pending',
+          settled_in_salary_id: null,
+          settled_at: null,
+          updated_at: new Date().toISOString()
+        }
+      }
+    )
 
-      // Automatically revert all linked Upad advances back to 'Pending'
-      await client.query(
-        `UPDATE upad_records 
-         SET status = 'Pending', settled_in_salary_id = NULL, settled_at = NULL, updated_at = NOW()
-         WHERE settled_in_salary_id = $1`,
-        [id]
-      )
+    await db.collection('salaries').deleteOne({ id: numId })
+    await CashBookService.deleteByReference('Salary', numId)
 
-      await client.query('DELETE FROM salaries WHERE id = $1', [id])
-      await CashBookService.deleteByReference('Salary', id, client)
-
-      await client.query('COMMIT')
-      return existing
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
-    }
+    const { _id, ...rest } = existing
+    return rest
   }
 
   static async getEmployeeSummary(employeeId: number) {
-    const emp = await EmployeeService.getById(employeeId)
-    if (!emp) throw new Error(`Employee with ID ${employeeId} does not exist.`)
+    const db = await getMongoDb()
+    const numEmpId = Number(employeeId)
+    const emp = await EmployeeService.getById(numEmpId)
+    if (!emp) throw new Error(`Employee with ID ${numEmpId} does not exist.`)
 
-    const totalSalaryRes = await query(
-      'SELECT COALESCE(SUM(salary_amount), 0) as total FROM salaries WHERE employee_id = $1',
-      [employeeId]
-    )
-    const totalPaidRes = await query(
-      'SELECT COALESCE(SUM(paid_amount), 0) as total FROM salaries WHERE employee_id = $1',
-      [employeeId]
-    )
-    const totalRemainingRes = await query(
-      'SELECT COALESCE(SUM(remaining_amount), 0) as total FROM salaries WHERE employee_id = $1',
-      [employeeId]
-    )
-    const historyRes = await query(
-      'SELECT * FROM salaries WHERE employee_id = $1 ORDER BY salary_year DESC, salary_month DESC, payment_date DESC',
-      [employeeId]
-    )
+    const salaries = await db
+      .collection('salaries')
+      .find({ employee_id: numEmpId })
+      .sort({ salary_year: -1, salary_month: -1, payment_date: -1 })
+      .toArray()
+
+    let totalSalary = 0
+    let totalPaid = 0
+    let totalRemaining = 0
+
+    for (const s of salaries) {
+      totalSalary += Number(s.salary_amount) || 0
+      totalPaid += Number(s.paid_amount) || 0
+      totalRemaining += Number(s.remaining_amount) || 0
+    }
 
     return {
       employee_id: emp.id,
       employee_name: emp.employee_name,
-      total_salary: parseFloat(totalSalaryRes.rows[0]?.total || '0.00'),
-      total_paid: parseFloat(totalPaidRes.rows[0]?.total || '0.00'),
-      total_remaining: parseFloat(totalRemainingRes.rows[0]?.total || '0.00'),
-      salary_history: historyRes.rows
+      total_salary: totalSalary,
+      total_paid: totalPaid,
+      total_remaining: totalRemaining,
+      salary_history: salaries.map(({ _id, ...rest }) => rest)
     }
   }
 }

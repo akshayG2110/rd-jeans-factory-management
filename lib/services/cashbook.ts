@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 
 export interface CashBookRecord {
   id: number
@@ -33,24 +33,21 @@ export interface CashBookForeignKeys {
 
 export class CashBookService {
   /**
-   * Recalculate running balances atomically using a single SQL window function (O(1) database trip)
+   * Recalculate running balances forward from startId
    */
-  static async recalculateBalancesFrom(startId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    
-    await db.query(
-      `WITH updated_balances AS (
-        SELECT 
-          id,
-          SUM(income_amount - out_amount) OVER (ORDER BY id ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS new_balance
-        FROM cash_book_ledger
-      )
-      UPDATE cash_book_ledger c
-      SET running_balance = u.new_balance, updated_at = NOW()
-      FROM updated_balances u
-      WHERE c.id = u.id AND c.id >= $1`,
-      [startId]
-    )
+  static async recalculateBalancesFrom(startId: number) {
+    const db = await getMongoDb()
+    const entries = await db.collection('cash_book_ledger').find({}).sort({ id: 1 }).toArray()
+    let running = 0
+    for (const entry of entries) {
+      running += (Number(entry.income_amount) || 0) - (Number(entry.out_amount) || 0)
+      if (entry.id >= startId && entry.running_balance !== running) {
+        await db.collection('cash_book_ledger').updateOne(
+          { _id: entry._id },
+          { $set: { running_balance: running, updated_at: new Date().toISOString() } }
+        )
+      }
+    }
   }
 
   static async logTransaction(
@@ -64,12 +61,12 @@ export class CashBookService {
     referenceModule: string,
     referenceId: number,
     notes?: string | null,
-    client?: any,
+    _client?: any,
     foreignKeys?: CashBookForeignKeys
   ) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
+    const db = await getMongoDb()
 
-    // Derive physical foreign keys from reference module if not explicitly provided
+    // Derive physical foreign keys
     const fks: CashBookForeignKeys = {
       upad_id: foreignKeys?.upad_id ?? (referenceModule.toLowerCase() === 'upad' ? referenceId : null),
       salary_id: foreignKeys?.salary_id ?? (referenceModule.toLowerCase() === 'salary' ? referenceId : null),
@@ -79,39 +76,40 @@ export class CashBookService {
       partner_id: foreignKeys?.partner_id ?? null
     }
 
-    // Fetch latest entry for previous balance
-    const latestRes = await db.query(
-      'SELECT running_balance FROM cash_book_ledger ORDER BY id DESC LIMIT 1'
-    )
-    const prevBalance = parseFloat(latestRes.rows[0]?.running_balance || '0.00')
-    const runningBalance = prevBalance + incomeAmount - outAmount
+    // Fetch previous latest entry
+    const latest = await db.collection('cash_book_ledger').find({}).sort({ id: -1 }).limit(1).toArray()
+    const prevBalance = Number(latest[0]?.running_balance || 0)
+    const runningBalance = prevBalance + (Number(incomeAmount) || 0) - (Number(outAmount) || 0)
 
-    const insertRes = await db.query(
-      `INSERT INTO cash_book_ledger 
-       (transaction_date, transaction_type, name, payment_method, income_amount, out_amount, running_balance, handled_by, reference_module, reference_id, upad_id, salary_id, seth_payment_id, income_id, expense_id, partner_id, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-       RETURNING *`,
-      [
-        transactionDate,
-        transactionType,
-        name,
-        paymentMethod,
-        incomeAmount,
-        outAmount,
-        runningBalance,
-        handledBy,
-        referenceModule,
-        referenceId,
-        fks.upad_id,
-        fks.salary_id,
-        fks.seth_payment_id,
-        fks.income_id,
-        fks.expense_id,
-        fks.partner_id,
-        notes || null
-      ]
-    )
-    return insertRes.rows[0]
+    const id = await getNextSequence('cash_book_ledger')
+    const now = new Date().toISOString()
+
+    const newEntry = {
+      id,
+      transaction_date: transactionDate,
+      transaction_type: transactionType,
+      name,
+      payment_method: paymentMethod,
+      income_amount: Number(incomeAmount) || 0,
+      out_amount: Number(outAmount) || 0,
+      running_balance: runningBalance,
+      handled_by: handledBy,
+      reference_module: referenceModule,
+      reference_id: referenceId,
+      upad_id: fks.upad_id,
+      salary_id: fks.salary_id,
+      seth_payment_id: fks.seth_payment_id,
+      income_id: fks.income_id,
+      expense_id: fks.expense_id,
+      partner_id: fks.partner_id,
+      notes: notes || null,
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('cash_book_ledger').insertOne(newEntry)
+    const { _id, ...rest } = newEntry as any
+    return rest
   }
 
   static async updateByReference(
@@ -126,15 +124,13 @@ export class CashBookService {
       notes?: string | null
       isIncome?: boolean
     },
-    client?: any
+    _client?: any
   ) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-
-    const findRes = await db.query(
-      'SELECT * FROM cash_book_ledger WHERE reference_module ILIKE $1 AND reference_id = $2',
-      [referenceModule, referenceId]
-    )
-    const entry = findRes.rows[0]
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({
+      reference_module: { $regex: `^${referenceModule}$`, $options: 'i' },
+      reference_id: Number(referenceId)
+    })
     if (!entry) return null
 
     const name = data.name !== undefined ? data.name : entry.name
@@ -143,77 +139,93 @@ export class CashBookService {
     const transactionDate = data.transactionDate !== undefined ? data.transactionDate : entry.transaction_date
     const notes = data.notes !== undefined ? data.notes : entry.notes
 
-    let incomeAmount = parseFloat(entry.income_amount)
-    let outAmount = parseFloat(entry.out_amount)
+    let incomeAmount = Number(entry.income_amount) || 0
+    let outAmount = Number(entry.out_amount) || 0
 
     if (data.amount !== undefined) {
       if (data.isIncome) {
-        incomeAmount = data.amount
+        incomeAmount = Number(data.amount)
         outAmount = 0
       } else {
         incomeAmount = 0
-        outAmount = data.amount
+        outAmount = Number(data.amount)
       }
     }
 
-    await db.query(
-      `UPDATE cash_book_ledger 
-       SET name = $1, payment_method = $2, handled_by = $3, transaction_date = $4, notes = $5, income_amount = $6, out_amount = $7, updated_at = NOW()
-       WHERE id = $8`,
-      [name, paymentMethod, handledBy, transactionDate, notes, incomeAmount, outAmount, entry.id]
+    await db.collection('cash_book_ledger').updateOne(
+      { id: entry.id },
+      {
+        $set: {
+          name,
+          payment_method: paymentMethod,
+          handled_by: handledBy,
+          transaction_date: transactionDate,
+          notes,
+          income_amount: incomeAmount,
+          out_amount: outAmount,
+          updated_at: new Date().toISOString()
+        }
+      }
     )
 
-    await this.recalculateBalancesFrom(entry.id, client)
+    await this.recalculateBalancesFrom(entry.id)
 
-    const updatedRes = await db.query('SELECT * FROM cash_book_ledger WHERE id = $1', [entry.id])
-    return updatedRes.rows[0]
+    const updated = await db.collection('cash_book_ledger').findOne({ id: entry.id })
+    const { _id, ...rest } = updated as any
+    return rest
   }
 
-  static async deleteByReference(referenceModule: string, referenceId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-
-    const findRes = await db.query(
-      'SELECT id FROM cash_book_ledger WHERE reference_module ILIKE $1 AND reference_id = $2',
-      [referenceModule, referenceId]
-    )
-    const entry = findRes.rows[0]
+  static async deleteByReference(referenceModule: string, referenceId: number, _client?: any) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({
+      reference_module: { $regex: `^${referenceModule}$`, $options: 'i' },
+      reference_id: Number(referenceId)
+    })
     if (!entry) return
 
     const entryId = entry.id
-    await db.query('DELETE FROM cash_book_ledger WHERE id = $1', [entryId])
-
-    // Notice: trg_cash_book_after_delete automatically runs on deletion, but we invoke recalculateBalancesFrom for transaction safety
-    await this.recalculateBalancesFrom(entryId, client)
+    await db.collection('cash_book_ledger').deleteOne({ id: entryId })
+    await this.recalculateBalancesFrom(entryId)
   }
 
-  static async getByUpadId(upadId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    const res = await db.query('SELECT * FROM cash_book_ledger WHERE upad_id = $1', [upadId])
-    return res.rows[0] || null
+  static async getByUpadId(upadId: number) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({ upad_id: Number(upadId) })
+    if (!entry) return null
+    const { _id, ...rest } = entry
+    return rest
   }
 
-  static async getBySalaryId(salaryId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    const res = await db.query('SELECT * FROM cash_book_ledger WHERE salary_id = $1', [salaryId])
-    return res.rows[0] || null
+  static async getBySalaryId(salaryId: number) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({ salary_id: Number(salaryId) })
+    if (!entry) return null
+    const { _id, ...rest } = entry
+    return rest
   }
 
-  static async getBySethPaymentId(sethPaymentId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    const res = await db.query('SELECT * FROM cash_book_ledger WHERE seth_payment_id = $1', [sethPaymentId])
-    return res.rows[0] || null
+  static async getBySethPaymentId(sethPaymentId: number) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({ seth_payment_id: Number(sethPaymentId) })
+    if (!entry) return null
+    const { _id, ...rest } = entry
+    return rest
   }
 
-  static async getByIncomeId(incomeId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    const res = await db.query('SELECT * FROM cash_book_ledger WHERE income_id = $1', [incomeId])
-    return res.rows[0] || null
+  static async getByIncomeId(incomeId: number) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({ income_id: Number(incomeId) })
+    if (!entry) return null
+    const { _id, ...rest } = entry
+    return rest
   }
 
-  static async getByExpenseId(expenseId: number, client?: any) {
-    const db = client || { query: (text: string, params?: any[]) => query(text, params) }
-    const res = await db.query('SELECT * FROM cash_book_ledger WHERE expense_id = $1', [expenseId])
-    return res.rows[0] || null
+  static async getByExpenseId(expenseId: number) {
+    const db = await getMongoDb()
+    const entry = await db.collection('cash_book_ledger').findOne({ expense_id: Number(expenseId) })
+    if (!entry) return null
+    const { _id, ...rest } = entry
+    return rest
   }
 
   static async getAll(filters: {
@@ -224,59 +236,74 @@ export class CashBookService {
     date_to?: string
     search?: string
   }) {
-    let sql = 'SELECT * FROM cash_book_ledger WHERE 1=1'
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
     if (filters.transaction_type) {
-      params.push(filters.transaction_type)
-      sql += ` AND transaction_type = $${params.length}`
+      queryFilter.transaction_type = filters.transaction_type
     }
     if (filters.payment_method) {
-      params.push(filters.payment_method)
-      sql += ` AND payment_method = $${params.length}`
+      queryFilter.payment_method = filters.payment_method
     }
     if (filters.handled_by) {
-      params.push(filters.handled_by)
-      sql += ` AND handled_by = $${params.length}`
+      queryFilter.handled_by = filters.handled_by
     }
-    if (filters.date_from) {
-      params.push(filters.date_from)
-      sql += ` AND transaction_date >= $${params.length}`
-    }
-    if (filters.date_to) {
-      params.push(filters.date_to)
-      sql += ` AND transaction_date <= $${params.length}`
+    if (filters.date_from || filters.date_to) {
+      queryFilter.transaction_date = {}
+      if (filters.date_from) queryFilter.transaction_date.$gte = filters.date_from
+      if (filters.date_to) queryFilter.transaction_date.$lte = filters.date_to
     }
     if (filters.search) {
-      params.push(`%${filters.search}%`)
-      sql += ` AND (name ILIKE $${params.length} OR notes ILIKE $${params.length})`
+      queryFilter.$or = [
+        { name: { $regex: filters.search, $options: 'i' } },
+        { notes: { $regex: filters.search, $options: 'i' } }
+      ]
     }
 
-    sql += ' ORDER BY transaction_date DESC, id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const records = await db
+      .collection('cash_book_ledger')
+      .find(queryFilter)
+      .sort({ transaction_date: -1, id: -1 })
+      .toArray()
+
+    return records.map(({ _id, ...rest }) => rest)
   }
 
   static async getDashboardSummary() {
+    const db = await getMongoDb()
     const today = new Date().toISOString().split('T')[0]
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
 
-    const latestRes = await query('SELECT running_balance FROM cash_book_ledger ORDER BY id DESC LIMIT 1')
-    const currentCashBalance = parseFloat(latestRes.rows[0]?.running_balance || '0.00')
+    const latest = await db.collection('cash_book_ledger').find({}).sort({ id: -1 }).limit(1).toArray()
+    const currentCashBalance = Number(latest[0]?.running_balance || 0)
 
-    const todayInRes = await query('SELECT COALESCE(SUM(income_amount), 0) as total FROM cash_book_ledger WHERE transaction_date = $1', [today])
-    const todayOutRes = await query('SELECT COALESCE(SUM(out_amount), 0) as total FROM cash_book_ledger WHERE transaction_date = $1', [today])
+    const allRecords = await db.collection('cash_book_ledger').find({}).toArray()
 
-    const monthInRes = await query('SELECT COALESCE(SUM(income_amount), 0) as total FROM cash_book_ledger WHERE transaction_date >= $1', [startOfMonth])
-    const monthOutRes = await query('SELECT COALESCE(SUM(out_amount), 0) as total FROM cash_book_ledger WHERE transaction_date >= $1', [startOfMonth])
+    let todayIn = 0
+    let todayOut = 0
+    let monthIn = 0
+    let monthOut = 0
+
+    for (const r of allRecords) {
+      const inc = Number(r.income_amount) || 0
+      const out = Number(r.out_amount) || 0
+      if (r.transaction_date === today) {
+        todayIn += inc
+        todayOut += out
+      }
+      if (r.transaction_date >= startOfMonth) {
+        monthIn += inc
+        monthOut += out
+      }
+    }
 
     return {
       current_cash_balance: currentCashBalance,
-      today_cash_in: parseFloat(todayInRes.rows[0]?.total || '0.00'),
-      today_cash_out: parseFloat(todayOutRes.rows[0]?.total || '0.00'),
-      monthly_cash_in: parseFloat(monthInRes.rows[0]?.total || '0.00'),
-      monthly_cash_out: parseFloat(monthOutRes.rows[0]?.total || '0.00'),
+      today_cash_in: todayIn,
+      today_cash_out: todayOut,
+      monthly_cash_in: monthIn,
+      monthly_cash_out: monthOut
     }
   }
 }

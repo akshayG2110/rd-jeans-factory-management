@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 
 export interface Roll {
   id: number
@@ -24,45 +24,43 @@ export class RollService {
     status?: string
     search?: string
   }) {
-    let sql = `
-      SELECT r.*, s.seth_name 
-      FROM rolls r
-      LEFT JOIN seths s ON r.seth_id = s.id
-      WHERE 1=1
-    `
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
-    if (filters.seth_id) {
-      params.push(filters.seth_id)
-      sql += ` AND r.seth_id = $${params.length}`
-    }
-    if (filters.fabric_type) {
-      params.push(filters.fabric_type)
-      sql += ` AND r.fabric_type = $${params.length}`
-    }
-    if (filters.status) {
-      params.push(filters.status)
-      sql += ` AND r.status = $${params.length}`
-    }
+    if (filters.seth_id) queryFilter.seth_id = Number(filters.seth_id)
+    if (filters.fabric_type) queryFilter.fabric_type = filters.fabric_type
+    if (filters.status) queryFilter.status = filters.status
+
     if (filters.search) {
-      params.push(`%${filters.search}%`)
-      sql += ` AND (r.roll_number ILIKE $${params.length} OR r.short_number ILIKE $${params.length} OR s.seth_name ILIKE $${params.length})`
+      queryFilter.$or = [
+        { roll_number: { $regex: filters.search, $options: 'i' } },
+        { short_number: { $regex: filters.search, $options: 'i' } }
+      ]
     }
 
-    sql += ' ORDER BY r.entry_date DESC, r.id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const rolls = await db.collection('rolls').find(queryFilter).sort({ entry_date: -1, id: -1 }).toArray()
+    const seths = await db.collection('seths').find({}).toArray()
+    const sethMap = new Map(seths.map(s => [s.id, s.seth_name]))
+
+    return rolls.map(r => {
+      const { _id, ...rest } = r
+      return {
+        ...rest,
+        seth_name: sethMap.get(r.seth_id) || ''
+      }
+    })
   }
 
   static async getById(id: number) {
-    const res = await query(
-      `SELECT r.*, s.seth_name 
-       FROM rolls r
-       LEFT JOIN seths s ON r.seth_id = s.id
-       WHERE r.id = $1`,
-      [id]
-    )
-    return res.rows[0] || null
+    const db = await getMongoDb()
+    const roll = await db.collection('rolls').findOne({ id: Number(id) })
+    if (!roll) return null
+    const seth = await db.collection('seths').findOne({ id: roll.seth_id })
+    const { _id, ...rest } = roll
+    return {
+      ...rest,
+      seth_name: seth?.seth_name || ''
+    }
   }
 
   static async create(data: {
@@ -74,31 +72,35 @@ export class RollService {
     received_meter: number
     notes?: string | null
   }) {
-    const sethRes = await query('SELECT seth_name FROM seths WHERE id = $1', [data.seth_id])
-    if (sethRes.rows.length === 0) {
-      throw new Error(`Seth client with ID ${data.seth_id} does not exist.`)
+    const db = await getMongoDb()
+    const numSethId = Number(data.seth_id)
+    const seth = await db.collection('seths').findOne({ id: numSethId })
+    if (!seth) {
+      throw new Error(`Seth client with ID ${numSethId} does not exist.`)
     }
 
-    const remaining_meter = data.received_meter
-    const status = 'Available'
+    const id = await getNextSequence('rolls')
+    const now = new Date().toISOString()
+    const received_meter = Number(data.received_meter)
+    const newRoll = {
+      id,
+      seth_id: numSethId,
+      entry_date: data.entry_date,
+      roll_number: data.roll_number,
+      short_number: data.short_number,
+      fabric_type: data.fabric_type,
+      received_meter,
+      used_meter: 0,
+      remaining_meter: received_meter,
+      status: 'Available',
+      notes: data.notes || null,
+      created_at: now,
+      updated_at: now
+    }
 
-    const res = await query(
-      `INSERT INTO rolls (seth_id, entry_date, roll_number, short_number, fabric_type, received_meter, used_meter, remaining_meter, status, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, 0.00, $7, $8, $9)
-       RETURNING *`,
-      [
-        data.seth_id,
-        data.entry_date,
-        data.roll_number,
-        data.short_number,
-        data.fabric_type,
-        data.received_meter,
-        remaining_meter,
-        status,
-        data.notes || null
-      ]
-    )
-    return { ...res.rows[0], seth_name: sethRes.rows[0].seth_name }
+    await db.collection('rolls').insertOne(newRoll)
+    const { _id, ...rest } = newRoll as any
+    return { ...rest, seth_name: seth.seth_name }
   }
 
   static async update(
@@ -113,12 +115,14 @@ export class RollService {
       notes: string | null
     }>
   ) {
-    const existing = await this.getById(id)
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('rolls').findOne({ id: numId })
     if (!existing) return null
 
-    const seth_id = data.seth_id !== undefined ? data.seth_id : existing.seth_id
-    const sethRes = await query('SELECT seth_name FROM seths WHERE id = $1', [seth_id])
-    if (sethRes.rows.length === 0) {
+    const seth_id = data.seth_id !== undefined ? Number(data.seth_id) : existing.seth_id
+    const seth = await db.collection('seths').findOne({ id: seth_id })
+    if (!seth) {
       throw new Error(`Seth client with ID ${seth_id} does not exist.`)
     }
 
@@ -126,10 +130,10 @@ export class RollService {
     const roll_number = data.roll_number !== undefined ? data.roll_number : existing.roll_number
     const short_number = data.short_number !== undefined ? data.short_number : existing.short_number
     const fabric_type = data.fabric_type !== undefined ? data.fabric_type : existing.fabric_type
-    const received_meter = data.received_meter !== undefined ? data.received_meter : parseFloat(existing.received_meter)
+    const received_meter = data.received_meter !== undefined ? Number(data.received_meter) : Number(existing.received_meter)
     const notes = data.notes !== undefined ? data.notes : existing.notes
 
-    const used_meter = parseFloat(existing.used_meter)
+    const used_meter = Number(existing.used_meter || 0)
     const remaining_meter = received_meter - used_meter
     let status = 'Available'
     if (remaining_meter <= 0) {
@@ -138,19 +142,36 @@ export class RollService {
       status = 'Partially Used'
     }
 
-    const res = await query(
-      `UPDATE rolls
-       SET seth_id = $1, entry_date = $2, roll_number = $3, short_number = $4, 
-           fabric_type = $5, received_meter = $6, remaining_meter = $7, status = $8, notes = $9, updated_at = NOW()
-       WHERE id = $10
-       RETURNING *`,
-      [seth_id, entry_date, roll_number, short_number, fabric_type, received_meter, remaining_meter, status, notes, id]
+    await db.collection('rolls').updateOne(
+      { id: numId },
+      {
+        $set: {
+          seth_id,
+          entry_date,
+          roll_number,
+          short_number,
+          fabric_type,
+          received_meter,
+          remaining_meter,
+          status,
+          notes,
+          updated_at: new Date().toISOString()
+        }
+      }
     )
-    return { ...res.rows[0], seth_name: sethRes.rows[0].seth_name }
+
+    const updated = await db.collection('rolls').findOne({ id: numId })
+    const { _id, ...rest } = updated as any
+    return { ...rest, seth_name: seth.seth_name }
   }
 
   static async delete(id: number) {
-    const res = await query('DELETE FROM rolls WHERE id = $1 RETURNING *', [id])
-    return res.rows[0] || null
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const roll = await db.collection('rolls').findOne({ id: numId })
+    if (!roll) return null
+    await db.collection('rolls').deleteOne({ id: numId })
+    const { _id, ...rest } = roll
+    return rest
   }
 }

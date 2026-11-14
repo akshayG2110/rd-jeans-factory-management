@@ -1,29 +1,48 @@
-import { query } from '../db'
+import { getMongoDb } from '../mongodb'
 import { CashBookService } from './cashbook'
 
 export class DashboardService {
   static async getMetrics() {
-    const empCountRes = await query("SELECT COUNT(*) as count FROM employees WHERE status = 'Active'")
-    const totalUpadRes = await query('SELECT COALESCE(SUM(amount), 0) as total FROM upad_records')
-    const totalSalaryRes = await query('SELECT COALESCE(SUM(paid_amount), 0) as total FROM salaries')
-    const rollsCountRes = await query("SELECT COUNT(*) as count FROM rolls WHERE status != 'Completed'")
-    const cuttingPiecesRes = await query('SELECT COALESCE(SUM(piece_count), 0) as total FROM cutting_entries')
-    const expensesRes = await query('SELECT COALESCE(SUM(amount), 0) as total FROM expenses')
-    const incomeRes = await query('SELECT COALESCE(SUM(amount), 0) as total FROM incomes')
+    const db = await getMongoDb()
 
-    const cashSummary = await CashBookService.getDashboardSummary()
-    const recentActivitiesRes = await query('SELECT * FROM cash_book_ledger ORDER BY id DESC LIMIT 10')
+    const [
+      activeEmpCount,
+      allUpads,
+      allSalaries,
+      activeRollsCount,
+      allCuts,
+      allExpenses,
+      allIncomes,
+      recentActivities,
+      cashSummary
+    ] = await Promise.all([
+      db.collection('employees').countDocuments({ status: 'Active' }),
+      db.collection('upad_records').find({}).toArray(),
+      db.collection('salaries').find({}).toArray(),
+      db.collection('rolls').countDocuments({ status: { $ne: 'Completed' } }),
+      db.collection('cutting_entries').find({}).toArray(),
+      db.collection('expenses').find({}).toArray(),
+      db.collection('incomes').find({}).toArray(),
+      db.collection('cash_book_ledger').find({}).sort({ id: -1 }).limit(10).toArray(),
+      CashBookService.getDashboardSummary()
+    ])
+
+    const totalUpad = allUpads.reduce((sum, u) => sum + (Number(u.amount) || 0), 0)
+    const totalSalary = allSalaries.reduce((sum, s) => sum + (Number(s.paid_amount) || 0), 0)
+    const totalPiecesCut = allCuts.reduce((sum, c) => sum + (Number(c.piece_count) || 0), 0)
+    const totalExpenses = allExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+    const totalIncome = allIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0)
 
     return {
-      total_employees: parseInt(empCountRes.rows[0]?.count || '0', 10),
-      total_upad: parseFloat(totalUpadRes.rows[0]?.total || '0.00'),
-      total_salary: parseFloat(totalSalaryRes.rows[0]?.total || '0.00'),
-      active_rolls: parseInt(rollsCountRes.rows[0]?.count || '0', 10),
-      total_pieces_cut: parseInt(cuttingPiecesRes.rows[0]?.total || '0', 10),
-      total_expenses: parseFloat(expensesRes.rows[0]?.total || '0.00'),
-      total_income: parseFloat(incomeRes.rows[0]?.total || '0.00'),
+      total_employees: activeEmpCount,
+      total_upad: totalUpad,
+      total_salary: totalSalary,
+      active_rolls: activeRollsCount,
+      total_pieces_cut: totalPiecesCut,
+      total_expenses: totalExpenses,
+      total_income: totalIncome,
       cash_summary: cashSummary,
-      recent_activities: recentActivitiesRes.rows
+      recent_activities: recentActivities.map(({ _id, ...rest }) => rest)
     }
   }
 }

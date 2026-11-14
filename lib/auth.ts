@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { query } from './db'
+import { getMongoDb } from './mongodb'
 
 const resolvedSecret = process.env.SECRET_KEY || process.env.JWT_SECRET
 const SECRET_KEY = resolvedSecret || 'e2b6c9b3d7a8e8f4c0a5d2c8e3b1c6d9a4b8e7c1d3f5a2e9b0c7d6e5f4a3b2c1'
@@ -81,23 +81,22 @@ export async function getAuthenticatedUser(request: Request): Promise<{ id?: num
 
 export async function ensureDefaultUser() {
   try {
-    const res = await query('SELECT COUNT(*) as count FROM users')
-    const count = parseInt(res.rows[0]?.count || '0', 10)
-    if (count === 0) {
+    const db = await getMongoDb()
+    const usersCol = db.collection('users')
+    const user = await usersCol.findOne({ username: 'rdjeans123' })
+    if (!user) {
       const hashed = await hashPassword('RD@123')
-      await query(
-        'INSERT INTO users (username, password_hash) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING',
-        ['rdjeans123', hashed]
-      )
-      console.log('Default user (rdjeans123) seeded into database with bcrypt.')
-    } else {
-      // Migrate existing clear-text password to bcrypt hash if present
-      const userRes = await query('SELECT id, password_hash FROM users WHERE username = $1', ['rdjeans123'])
-      if (userRes.rows.length > 0 && userRes.rows[0].password_hash === 'RD@123') {
-        const hashed = await hashPassword('RD@123')
-        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashed, userRes.rows[0].id])
-        console.log('Migrated rdjeans123 clear-text password to bcrypt.')
-      }
+      await usersCol.insertOne({
+        id: 1,
+        username: 'rdjeans123',
+        password_hash: hashed,
+        created_at: new Date().toISOString()
+      })
+      console.log('Default user (rdjeans123) seeded into MongoDB Atlas.')
+    } else if (user.password_hash === 'RD@123') {
+      const hashed = await hashPassword('RD@123')
+      await usersCol.updateOne({ _id: user._id }, { $set: { password_hash: hashed } })
+      console.log('Migrated rdjeans123 clear-text password to bcrypt in MongoDB Atlas.')
     }
   } catch (err) {
     console.error('ensureDefaultUser error:', err)

@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 
 export interface FinishedGoodsRecord {
   id: number
@@ -33,63 +33,82 @@ export class FinishedGoodsService {
     size?: string
     search?: string
   }) {
-    let sql = `
-      SELECT fg.*, 
-             s.seth_name, 
-             r.fabric_type, 
-             r.roll_number,
-             e.employee_name as cutter_name
-      FROM finished_goods fg
-      LEFT JOIN cutting_entries c ON fg.cutting_id = c.id
-      LEFT JOIN rolls r ON c.roll_id = r.id
-      LEFT JOIN seths s ON fg.seth_id = s.id
-      LEFT JOIN employees e ON c.employee_id = e.id
-      WHERE 1=1
-    `
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
-    if (filters?.cutting_id) {
-      params.push(filters.cutting_id)
-      sql += ` AND fg.cutting_id = $${params.length}`
-    }
-    if (filters?.seth_id) {
-      params.push(filters.seth_id)
-      sql += ` AND fg.seth_id = $${params.length}`
-    }
-    if (filters?.status) {
-      params.push(filters.status)
-      sql += ` AND fg.status = $${params.length}`
-    }
-    if (filters?.size) {
-      params.push(filters.size)
-      sql += ` AND fg.size = $${params.length}`
-    }
+    if (filters?.cutting_id) queryFilter.cutting_id = Number(filters.cutting_id)
+    if (filters?.seth_id) queryFilter.seth_id = Number(filters.seth_id)
+    if (filters?.status) queryFilter.status = filters.status
+    if (filters?.size) queryFilter.size = filters.size
+
     if (filters?.search) {
-      params.push(`%${filters.search}%`)
-      sql += ` AND (fg.lot_number ILIKE $${params.length} OR fg.item_name ILIKE $${params.length} OR s.seth_name ILIKE $${params.length} OR fg.color_shade ILIKE $${params.length})`
+      queryFilter.$or = [
+        { lot_number: { $regex: filters.search, $options: 'i' } },
+        { item_name: { $regex: filters.search, $options: 'i' } },
+        { color_shade: { $regex: filters.search, $options: 'i' } }
+      ]
     }
 
-    sql += ' ORDER BY fg.id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const fgList = await db.collection('finished_goods').find(queryFilter).sort({ id: -1 }).toArray()
+    const cuttings = await db.collection('cutting_entries').find({}).toArray()
+    const rolls = await db.collection('rolls').find({}).toArray()
+    const seths = await db.collection('seths').find({}).toArray()
+    const employees = await db.collection('employees').find({}).toArray()
+
+    const cutMap = new Map(cuttings.map(c => [c.id, c]))
+    const rollMap = new Map(rolls.map(r => [r.id, r]))
+    const sethMap = new Map(seths.map(s => [s.id, s.seth_name]))
+    const empMap = new Map(employees.map(e => [e.id, e.employee_name]))
+
+    return fgList.map(fg => {
+      const { _id, ...rest } = fg
+      const cut = cutMap.get(fg.cutting_id)
+      const roll = cut ? rollMap.get(cut.roll_id) : null
+      return {
+        ...rest,
+        seth_name: fg.seth_id ? sethMap.get(fg.seth_id) || '' : '',
+        fabric_type: roll?.fabric_type || '',
+        roll_number: roll?.roll_number || '',
+        cutter_name: cut?.employee_id ? empMap.get(cut.employee_id) || '' : ''
+      }
+    })
   }
 
-  static async getById(id: number) {
-    const res = await query(
-      `SELECT fg.*, 
-              s.seth_name, 
-              r.fabric_type, 
-              r.roll_number,
-              e.employee_name as cutter_name
-       FROM finished_goods fg
-       LEFT JOIN cutting_entries c ON fg.cutting_id = c.id
-       LEFT JOIN rolls r ON c.roll_id = r.id
-       LEFT JOIN seths s ON fg.seth_id = s.id
-       LEFT JOIN employees e ON c.employee_id = e.id
-       WHERE fg.id = $1`,
-      [id]
-    )
-    return res.rows[0] || null
+  static async getById(id: number): Promise<FinishedGoodsRecord | null> {
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const fg = await db.collection('finished_goods').findOne({ id: numId })
+    if (!fg) return null
+
+    const cut = await db.collection('cutting_entries').findOne({ id: fg.cutting_id })
+    const roll = cut ? await db.collection('rolls').findOne({ id: cut.roll_id }) : null
+    const seth = fg.seth_id ? await db.collection('seths').findOne({ id: fg.seth_id }) : null
+    const emp = cut?.employee_id ? await db.collection('employees').findOne({ id: cut.employee_id }) : null
+
+    return {
+      id: Number(fg.id),
+      cutting_id: Number(fg.cutting_id),
+      seth_id: fg.seth_id ? Number(fg.seth_id) : null,
+      lot_number: String(fg.lot_number),
+      item_name: String(fg.item_name || 'Denim Jeans'),
+      size: String(fg.size),
+      color_shade: String(fg.color_shade || 'Standard Indigo'),
+      total_pieces: Number(fg.total_pieces || 0),
+      stitching_pieces: Number(fg.stitching_pieces || 0),
+      finished_pieces: Number(fg.finished_pieces || 0),
+      rejected_pieces: Number(fg.rejected_pieces || 0),
+      dispatched_pieces: Number(fg.dispatched_pieces || 0),
+      status: fg.status as any,
+      unit_price: Number(fg.unit_price || 0),
+      dispatch_date: fg.dispatch_date || null,
+      notes: fg.notes || null,
+      created_at: String(fg.created_at || ''),
+      updated_at: String(fg.updated_at || ''),
+      seth_name: seth?.seth_name || '',
+      fabric_type: roll?.fabric_type || '',
+      roll_number: roll?.roll_number || '',
+      cutter_name: emp?.employee_name || ''
+    }
   }
 
   static async getByCuttingId(cuttingId: number) {
@@ -113,60 +132,41 @@ export class FinishedGoodsService {
     dispatch_date?: string | null
     notes?: string | null
   }) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
-
-      // Verify cutting entry exists
-      const cutRes = await client.query(
-        `SELECT c.id, c.lot_number, r.seth_id
-         FROM cutting_entries c
-         LEFT JOIN rolls r ON c.roll_id = r.id
-         WHERE c.id = $1`,
-        [data.cutting_id]
-      )
-      if (cutRes.rows.length === 0) {
-        throw new Error(`Cutting entry with ID ${data.cutting_id} does not exist.`)
-      }
-
-      const cutEntry = cutRes.rows[0]
-      const sethId = data.seth_id !== undefined ? data.seth_id : cutEntry.seth_id
-      const lotNumber = data.lot_number || cutEntry.lot_number
-
-      const insertRes = await client.query(
-        `INSERT INTO finished_goods 
-         (cutting_id, seth_id, lot_number, item_name, size, color_shade, 
-          total_pieces, stitching_pieces, finished_pieces, rejected_pieces, dispatched_pieces, 
-          status, unit_price, dispatch_date, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-         RETURNING *`,
-        [
-          data.cutting_id,
-          sethId || null,
-          lotNumber,
-          data.item_name || 'Denim Jeans',
-          data.size,
-          data.color_shade || 'Standard Indigo',
-          data.total_pieces,
-          data.stitching_pieces || 0,
-          data.finished_pieces || 0,
-          data.rejected_pieces || 0,
-          data.dispatched_pieces || 0,
-          data.status || 'Cut',
-          data.unit_price || 0.00,
-          data.dispatch_date || null,
-          data.notes || null
-        ]
-      )
-
-      await client.query('COMMIT')
-      return await this.getById(insertRes.rows[0].id)
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    const db = await getMongoDb()
+    const numCuttingId = Number(data.cutting_id)
+    const cut = await db.collection('cutting_entries').findOne({ id: numCuttingId })
+    if (!cut) {
+      throw new Error(`Cutting entry with ID ${numCuttingId} does not exist.`)
     }
+
+    const roll = await db.collection('rolls').findOne({ id: cut.roll_id })
+    const sethId = data.seth_id !== undefined ? (data.seth_id ? Number(data.seth_id) : null) : (roll?.seth_id || null)
+
+    const id = await getNextSequence('finished_goods')
+    const now = new Date().toISOString()
+    const newFg = {
+      id,
+      cutting_id: numCuttingId,
+      seth_id: sethId,
+      lot_number: data.lot_number || cut.lot_number,
+      item_name: data.item_name || 'Denim Jeans',
+      size: data.size,
+      color_shade: data.color_shade || 'Standard Indigo',
+      total_pieces: Number(data.total_pieces),
+      stitching_pieces: Number(data.stitching_pieces || 0),
+      finished_pieces: Number(data.finished_pieces || 0),
+      rejected_pieces: Number(data.rejected_pieces || 0),
+      dispatched_pieces: Number(data.dispatched_pieces || 0),
+      status: data.status || 'Cut',
+      unit_price: Number(data.unit_price || 0),
+      dispatch_date: data.dispatch_date || null,
+      notes: data.notes || null,
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('finished_goods').insertOne(newFg)
+    return await this.getById(id)
   }
 
   static async update(
@@ -187,49 +187,30 @@ export class FinishedGoodsService {
       notes: string | null
     }>
   ) {
-    const existing = await this.getById(id)
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('finished_goods').findOne({ id: numId })
     if (!existing) return null
 
-    const seth_id = data.seth_id !== undefined ? data.seth_id : existing.seth_id
-    const item_name = data.item_name !== undefined ? data.item_name : existing.item_name
-    const size = data.size !== undefined ? data.size : existing.size
-    const color_shade = data.color_shade !== undefined ? data.color_shade : existing.color_shade
-    const total_pieces = data.total_pieces !== undefined ? data.total_pieces : existing.total_pieces
-    const stitching_pieces = data.stitching_pieces !== undefined ? data.stitching_pieces : existing.stitching_pieces
-    const finished_pieces = data.finished_pieces !== undefined ? data.finished_pieces : existing.finished_pieces
-    const rejected_pieces = data.rejected_pieces !== undefined ? data.rejected_pieces : existing.rejected_pieces
-    const dispatched_pieces = data.dispatched_pieces !== undefined ? data.dispatched_pieces : existing.dispatched_pieces
-    const status = data.status !== undefined ? data.status : existing.status
-    const unit_price = data.unit_price !== undefined ? data.unit_price : existing.unit_price
-    const dispatch_date = data.dispatch_date !== undefined ? data.dispatch_date : existing.dispatch_date
-    const notes = data.notes !== undefined ? data.notes : existing.notes
+    const updateFields: any = {
+      updated_at: new Date().toISOString()
+    }
+    if (data.seth_id !== undefined) updateFields.seth_id = data.seth_id ? Number(data.seth_id) : null
+    if (data.item_name !== undefined) updateFields.item_name = data.item_name
+    if (data.size !== undefined) updateFields.size = data.size
+    if (data.color_shade !== undefined) updateFields.color_shade = data.color_shade
+    if (data.total_pieces !== undefined) updateFields.total_pieces = Number(data.total_pieces)
+    if (data.stitching_pieces !== undefined) updateFields.stitching_pieces = Number(data.stitching_pieces)
+    if (data.finished_pieces !== undefined) updateFields.finished_pieces = Number(data.finished_pieces)
+    if (data.rejected_pieces !== undefined) updateFields.rejected_pieces = Number(data.rejected_pieces)
+    if (data.dispatched_pieces !== undefined) updateFields.dispatched_pieces = Number(data.dispatched_pieces)
+    if (data.status !== undefined) updateFields.status = data.status
+    if (data.unit_price !== undefined) updateFields.unit_price = Number(data.unit_price)
+    if (data.dispatch_date !== undefined) updateFields.dispatch_date = data.dispatch_date
+    if (data.notes !== undefined) updateFields.notes = data.notes
 
-    await query(
-      `UPDATE finished_goods
-       SET seth_id = $1, item_name = $2, size = $3, color_shade = $4,
-           total_pieces = $5, stitching_pieces = $6, finished_pieces = $7, 
-           rejected_pieces = $8, dispatched_pieces = $9, status = $10, 
-           unit_price = $11, dispatch_date = $12, notes = $13, updated_at = NOW()
-       WHERE id = $14`,
-      [
-        seth_id,
-        item_name,
-        size,
-        color_shade,
-        total_pieces,
-        stitching_pieces,
-        finished_pieces,
-        rejected_pieces,
-        dispatched_pieces,
-        status,
-        unit_price,
-        dispatch_date,
-        notes,
-        id
-      ]
-    )
-
-    return await this.getById(id)
+    await db.collection('finished_goods').updateOne({ id: numId }, { $set: updateFields })
+    return await this.getById(numId)
   }
 
   static async updateStage(
@@ -251,29 +232,36 @@ export class FinishedGoodsService {
     const existing = await this.getById(id)
     if (!existing) return null
 
-    await query('DELETE FROM finished_goods WHERE id = $1', [id])
+    const db = await getMongoDb()
+    await db.collection('finished_goods').deleteOne({ id: Number(id) })
     return existing
   }
 
   static async getSummary() {
-    const res = await query(`
-      SELECT 
-        COALESCE(SUM(total_pieces), 0) as total_cut,
-        COALESCE(SUM(stitching_pieces), 0) as total_in_stitching,
-        COALESCE(SUM(finished_pieces), 0) as total_ready,
-        COALESCE(SUM(dispatched_pieces), 0) as total_dispatched,
-        COALESCE(SUM(rejected_pieces), 0) as total_rejected,
-        COUNT(id) as total_batches
-      FROM finished_goods
-    `)
-    const row = res.rows[0]
+    const db = await getMongoDb()
+    const all = await db.collection('finished_goods').find({}).toArray()
+
+    let totalCut = 0
+    let totalInStitching = 0
+    let totalReady = 0
+    let totalDispatched = 0
+    let totalRejected = 0
+
+    for (const fg of all) {
+      totalCut += Number(fg.total_pieces || 0)
+      totalInStitching += Number(fg.stitching_pieces || 0)
+      totalReady += Number(fg.finished_pieces || 0)
+      totalDispatched += Number(fg.dispatched_pieces || 0)
+      totalRejected += Number(fg.rejected_pieces || 0)
+    }
+
     return {
-      totalCut: parseInt(row.total_cut, 10),
-      totalInStitching: parseInt(row.total_in_stitching, 10),
-      totalReady: parseInt(row.total_ready, 10),
-      totalDispatched: parseInt(row.total_dispatched, 10),
-      totalRejected: parseInt(row.total_rejected, 10),
-      totalBatches: parseInt(row.total_batches, 10)
+      totalCut,
+      totalInStitching,
+      totalReady,
+      totalDispatched,
+      totalRejected,
+      totalBatches: all.length
     }
   }
 }

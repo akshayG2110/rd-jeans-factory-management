@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 
 export interface CuttingEntry {
   id: number
@@ -25,17 +25,16 @@ export interface CuttingEntry {
 }
 
 export class CuttingService {
-  private static async updateRollMeterAndStatus(client: any, rollId: number) {
-    const totalUsedRes = await client.query(
-      'SELECT COALESCE(SUM(meter_used), 0) as total FROM cutting_entries WHERE roll_id = $1',
-      [rollId]
-    )
-    const totalUsed = parseFloat(totalUsedRes.rows[0]?.total || '0.00')
+  private static async updateRollMeterAndStatus(rollId: number) {
+    const db = await getMongoDb()
+    const numRollId = Number(rollId)
+    const cuts = await db.collection('cutting_entries').find({ roll_id: numRollId }).toArray()
+    const totalUsed = cuts.reduce((sum, c) => sum + (Number(c.meter_used) || 0), 0)
 
-    const rollRes = await client.query('SELECT received_meter FROM rolls WHERE id = $1', [rollId])
-    if (rollRes.rows.length === 0) return
+    const roll = await db.collection('rolls').findOne({ id: numRollId })
+    if (!roll) return
 
-    const receivedMeter = parseFloat(rollRes.rows[0].received_meter)
+    const receivedMeter = Number(roll.received_meter) || 0
     const remainingMeter = receivedMeter - totalUsed
 
     let status = 'Available'
@@ -45,9 +44,16 @@ export class CuttingService {
       status = 'Partially Used'
     }
 
-    await client.query(
-      'UPDATE rolls SET used_meter = $1, remaining_meter = $2, status = $3, updated_at = NOW() WHERE id = $4',
-      [totalUsed, remainingMeter, status, rollId]
+    await db.collection('rolls').updateOne(
+      { id: numRollId },
+      {
+        $set: {
+          used_meter: totalUsed,
+          remaining_meter: remainingMeter,
+          status,
+          updated_at: new Date().toISOString()
+        }
+      }
     )
   }
 
@@ -60,70 +66,85 @@ export class CuttingService {
     date_to?: string
     search?: string
   }) {
-    let sql = `
-      SELECT c.*, r.roll_number, r.fabric_type, s.seth_name,
-             e.employee_name, e.role as employee_role
-      FROM cutting_entries c
-      LEFT JOIN rolls r ON c.roll_id = r.id
-      LEFT JOIN seths s ON r.seth_id = s.id
-      LEFT JOIN employees e ON c.employee_id = e.id
-      WHERE 1=1
-    `
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
-    if (filters.roll_id) {
-      params.push(filters.roll_id)
-      sql += ` AND c.roll_id = $${params.length}`
+    if (filters.roll_id) queryFilter.roll_id = Number(filters.roll_id)
+    if (filters.employee_id) queryFilter.employee_id = Number(filters.employee_id)
+    if (filters.size) queryFilter.size = filters.size
+    if (filters.sort_number) queryFilter.sort_number = filters.sort_number
+
+    if (filters.date_from || filters.date_to) {
+      queryFilter.cutting_date = {}
+      if (filters.date_from) queryFilter.cutting_date.$gte = filters.date_from
+      if (filters.date_to) queryFilter.cutting_date.$lte = filters.date_to
     }
-    if (filters.employee_id) {
-      params.push(filters.employee_id)
-      sql += ` AND c.employee_id = $${params.length}`
-    }
-    if (filters.size) {
-      params.push(filters.size)
-      sql += ` AND c.size = $${params.length}`
-    }
-    if (filters.sort_number) {
-      params.push(filters.sort_number)
-      sql += ` AND c.sort_number = $${params.length}`
-    }
-    if (filters.date_from) {
-      params.push(filters.date_from)
-      sql += ` AND c.cutting_date >= $${params.length}`
-    }
-    if (filters.date_to) {
-      params.push(filters.date_to)
-      sql += ` AND c.cutting_date <= $${params.length}`
-    }
+
     if (filters.search) {
-      params.push(`%${filters.search}%`)
-      sql += ` AND (c.lot_number ILIKE $${params.length} OR r.roll_number ILIKE $${params.length} OR c.sort_number ILIKE $${params.length} OR e.employee_name ILIKE $${params.length})`
+      queryFilter.$or = [
+        { lot_number: { $regex: filters.search, $options: 'i' } },
+        { sort_number: { $regex: filters.search, $options: 'i' } }
+      ]
     }
 
-    sql += ' ORDER BY c.cutting_date DESC, c.id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const cuts = await db.collection('cutting_entries').find(queryFilter).sort({ cutting_date: -1, id: -1 }).toArray()
+    const rolls = await db.collection('rolls').find({}).toArray()
+    const seths = await db.collection('seths').find({}).toArray()
+    const employees = await db.collection('employees').find({}).toArray()
+
+    const rollMap = new Map(rolls.map(r => [r.id, r]))
+    const sethMap = new Map(seths.map(s => [s.id, s.seth_name]))
+    const empMap = new Map(employees.map(e => [e.id, e]))
+
+    return cuts.map(c => {
+      const { _id, ...rest } = c
+      const roll = rollMap.get(c.roll_id)
+      const emp = c.employee_id ? empMap.get(c.employee_id) : null
+      return {
+        ...rest,
+        roll_number: roll?.roll_number || '',
+        fabric_type: roll?.fabric_type || '',
+        seth_name: roll ? sethMap.get(roll.seth_id) || '' : '',
+        employee_name: emp?.employee_name || null,
+        employee_role: emp?.role || null
+      }
+    })
   }
 
-  static async getById(id: number) {
-    const res = await query(
-      `SELECT c.*, r.roll_number, r.fabric_type, s.seth_name,
-              e.employee_name, e.role as employee_role
-       FROM cutting_entries c
-       LEFT JOIN rolls r ON c.roll_id = r.id
-       LEFT JOIN seths s ON r.seth_id = s.id
-       LEFT JOIN employees e ON c.employee_id = e.id
-       WHERE c.id = $1`,
-      [id]
-    )
-    if (!res.rows[0]) return null
+  static async getById(id: number): Promise<CuttingEntry | null> {
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const cut = await db.collection('cutting_entries').findOne({ id: numId })
+    if (!cut) return null
 
-    const fgRes = await query(
-      `SELECT * FROM finished_goods WHERE cutting_id = $1 ORDER BY id ASC`,
-      [id]
-    )
-    res.rows[0].finished_goods = fgRes.rows
-    return res.rows[0]
+    const roll = await db.collection('rolls').findOne({ id: cut.roll_id })
+    const seth = roll ? await db.collection('seths').findOne({ id: roll.seth_id }) : null
+    const emp = cut.employee_id ? await db.collection('employees').findOne({ id: cut.employee_id }) : null
+    const finishedGoods = await db.collection('finished_goods').find({ cutting_id: numId }).sort({ id: 1 }).toArray()
+
+    return {
+      id: Number(cut.id),
+      cutting_date: String(cut.cutting_date),
+      lot_number: String(cut.lot_number),
+      roll_id: Number(cut.roll_id),
+      employee_id: cut.employee_id ? Number(cut.employee_id) : null,
+      meter_used: Number(cut.meter_used),
+      layer_information: cut.layer_information || null,
+      piece_count: Number(cut.piece_count),
+      size: String(cut.size),
+      pana: cut.pana !== undefined ? Number(cut.pana) : null,
+      average: cut.average !== undefined ? Number(cut.average) : null,
+      sort_number: cut.sort_number || null,
+      notes: cut.notes || null,
+      created_at: String(cut.created_at || ''),
+      updated_at: String(cut.updated_at || ''),
+      roll_number: roll?.roll_number || '',
+      fabric_type: roll?.fabric_type || '',
+      seth_name: seth?.seth_name || '',
+      employee_name: emp?.employee_name || null,
+      employee_role: emp?.role || null,
+      finished_goods: finishedGoods.map(({ _id, ...fg }) => fg)
+    }
   }
 
   static async getByEmployeeId(employeeId: number) {
@@ -144,80 +165,72 @@ export class CuttingService {
     sort_number?: string | null
     notes?: string | null
   }) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
-
-      const rollRes = await client.query('SELECT remaining_meter FROM rolls WHERE id = $1', [data.roll_id])
-      if (rollRes.rows.length === 0) {
-        throw new Error(`Roll with ID ${data.roll_id} does not exist.`)
-      }
-
-      const remainingMeter = parseFloat(rollRes.rows[0].remaining_meter || '0')
-      if (data.meter_used > remainingMeter) {
-        throw new Error(`Cannot cut ${data.meter_used}m. Roll #${data.roll_id} only has ${remainingMeter}m remaining.`)
-      }
-
-      if (data.employee_id) {
-        const empRes = await client.query('SELECT id, employee_name FROM employees WHERE id = $1', [data.employee_id])
-        if (empRes.rows.length === 0) {
-          throw new Error(`Employee with ID ${data.employee_id} does not exist.`)
-        }
-      }
-
-      const insertRes = await client.query(
-        `INSERT INTO cutting_entries 
-         (cutting_date, lot_number, roll_id, employee_id, meter_used, layer_information, piece_count, size, pana, average, sort_number, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         RETURNING *`,
-        [
-          data.cutting_date,
-          data.lot_number,
-          data.roll_id,
-          data.employee_id || null,
-          data.meter_used,
-          data.layer_information || null,
-          data.piece_count,
-          data.size,
-          data.pana || null,
-          data.average || null,
-          data.sort_number || null,
-          data.notes || null
-        ]
-      )
-      const rawCutting = insertRes.rows[0]
-
-      // Automatically initialize linked Finished Goods Garment Inventory
-      const rollSethRes = await client.query('SELECT seth_id FROM rolls WHERE id = $1', [data.roll_id])
-      const sethId = rollSethRes.rows[0]?.seth_id || null
-
-      await client.query(
-        `INSERT INTO finished_goods 
-         (cutting_id, seth_id, lot_number, item_name, size, total_pieces, finished_pieces, status, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          rawCutting.id,
-          sethId,
-          data.lot_number,
-          'Denim Jeans',
-          data.size,
-          data.piece_count,
-          data.piece_count,
-          'Cut',
-          `Initial production yield from Roll #${data.roll_id}`
-        ]
-      )
-
-      await this.updateRollMeterAndStatus(client, data.roll_id)
-
-      await client.query('COMMIT')
-      return await this.getById(rawCutting.id)
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    const db = await getMongoDb()
+    const numRollId = Number(data.roll_id)
+    const roll = await db.collection('rolls').findOne({ id: numRollId })
+    if (!roll) {
+      throw new Error(`Roll with ID ${numRollId} does not exist.`)
     }
+
+    const remainingMeter = Number(roll.remaining_meter || 0)
+    if (data.meter_used > remainingMeter) {
+      throw new Error(`Cannot cut ${data.meter_used}m. Roll #${numRollId} only has ${remainingMeter}m remaining.`)
+    }
+
+    if (data.employee_id) {
+      const emp = await db.collection('employees').findOne({ id: Number(data.employee_id) })
+      if (!emp) {
+        throw new Error(`Employee with ID ${data.employee_id} does not exist.`)
+      }
+    }
+
+    const id = await getNextSequence('cutting_entries')
+    const now = new Date().toISOString()
+    const newCut = {
+      id,
+      cutting_date: data.cutting_date,
+      lot_number: data.lot_number,
+      roll_id: numRollId,
+      employee_id: data.employee_id ? Number(data.employee_id) : null,
+      meter_used: Number(data.meter_used),
+      layer_information: data.layer_information || null,
+      piece_count: Number(data.piece_count),
+      size: data.size,
+      pana: data.pana || null,
+      average: data.average || null,
+      sort_number: data.sort_number || null,
+      notes: data.notes || null,
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('cutting_entries').insertOne(newCut)
+
+    // Automatically initialize linked Finished Goods
+    const fgId = await getNextSequence('finished_goods')
+    await db.collection('finished_goods').insertOne({
+      id: fgId,
+      cutting_id: id,
+      seth_id: roll.seth_id,
+      lot_number: data.lot_number,
+      item_name: 'Denim Jeans',
+      size: data.size,
+      color_shade: 'Standard Indigo',
+      total_pieces: Number(data.piece_count),
+      stitching_pieces: 0,
+      finished_pieces: Number(data.piece_count),
+      rejected_pieces: 0,
+      dispatched_pieces: 0,
+      status: 'Cut',
+      unit_price: 0,
+      dispatch_date: null,
+      notes: `Initial production yield from Roll #${numRollId}`,
+      created_at: now,
+      updated_at: now
+    })
+
+    await this.updateRollMeterAndStatus(numRollId)
+    return await this.getById(id)
   }
 
   static async update(
@@ -237,103 +250,79 @@ export class CuttingService {
       notes: string | null
     }>
   ) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('cutting_entries').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM cutting_entries WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    const oldRollId = existing.roll_id
 
-      const oldRollId = existing.roll_id
+    if (data.employee_id !== undefined && data.employee_id !== null) {
+      const emp = await db.collection('employees').findOne({ id: Number(data.employee_id) })
+      if (!emp) {
+        throw new Error(`Employee with ID ${data.employee_id} does not exist.`)
+      }
+    }
 
-      if (data.employee_id !== undefined && data.employee_id !== null) {
-        const empRes = await client.query('SELECT id FROM employees WHERE id = $1', [data.employee_id])
-        if (empRes.rows.length === 0) {
-          throw new Error(`Employee with ID ${data.employee_id} does not exist.`)
+    const cutting_date = data.cutting_date !== undefined ? data.cutting_date : existing.cutting_date
+    const lot_number = data.lot_number !== undefined ? data.lot_number : existing.lot_number
+    const roll_id = data.roll_id !== undefined ? Number(data.roll_id) : existing.roll_id
+    const employee_id = data.employee_id !== undefined ? (data.employee_id ? Number(data.employee_id) : null) : existing.employee_id
+    const meter_used = data.meter_used !== undefined ? Number(data.meter_used) : Number(existing.meter_used)
+
+    if (data.meter_used !== undefined && data.meter_used !== Number(existing.meter_used)) {
+      const roll = await db.collection('rolls').findOne({ id: roll_id })
+      if (roll) {
+        const currentRemaining = Number(roll.remaining_meter || 0)
+        const effectivelyAvailable = currentRemaining + (roll_id === oldRollId ? Number(existing.meter_used) : 0)
+        if (meter_used > effectivelyAvailable) {
+          throw new Error(`Cannot cut ${meter_used}m. Roll #${roll_id} only has ${effectivelyAvailable}m available.`)
         }
       }
+    }
 
-      const cutting_date = data.cutting_date !== undefined ? data.cutting_date : existing.cutting_date
-      const lot_number = data.lot_number !== undefined ? data.lot_number : existing.lot_number
-      const roll_id = data.roll_id !== undefined ? data.roll_id : existing.roll_id
-      const employee_id = data.employee_id !== undefined ? data.employee_id : existing.employee_id
-      const meter_used = data.meter_used !== undefined ? data.meter_used : parseFloat(existing.meter_used)
-
-      if (data.meter_used !== undefined && data.meter_used !== parseFloat(existing.meter_used)) {
-        const rollRes = await client.query('SELECT remaining_meter FROM rolls WHERE id = $1', [roll_id])
-        if (rollRes.rows.length > 0) {
-          const currentRemaining = parseFloat(rollRes.rows[0].remaining_meter || '0')
-          const effectivelyAvailable = currentRemaining + (roll_id === oldRollId ? parseFloat(existing.meter_used) : 0)
-          if (meter_used > effectivelyAvailable) {
-            throw new Error(`Cannot cut ${meter_used}m. Roll #${roll_id} only has ${effectivelyAvailable}m available.`)
-          }
-        }
-      }
-      const layer_information = data.layer_information !== undefined ? data.layer_information : existing.layer_information
-      const piece_count = data.piece_count !== undefined ? data.piece_count : existing.piece_count
-      const size = data.size !== undefined ? data.size : existing.size
-      const pana = data.pana !== undefined ? data.pana : existing.pana
-      const average = data.average !== undefined ? data.average : existing.average
-      const sort_number = data.sort_number !== undefined ? data.sort_number : existing.sort_number
-      const notes = data.notes !== undefined ? data.notes : existing.notes
-
-      await client.query(
-        `UPDATE cutting_entries
-         SET cutting_date = $1, lot_number = $2, roll_id = $3, employee_id = $4, meter_used = $5, layer_information = $6, 
-             piece_count = $7, size = $8, pana = $9, average = $10, sort_number = $11, notes = $12, updated_at = NOW()
-         WHERE id = $13`,
-        [
+    await db.collection('cutting_entries').updateOne(
+      { id: numId },
+      {
+        $set: {
           cutting_date,
           lot_number,
           roll_id,
           employee_id,
           meter_used,
-          layer_information,
-          piece_count,
-          size,
-          pana,
-          average,
-          sort_number,
-          notes,
-          id
-        ]
-      )
-
-      await this.updateRollMeterAndStatus(client, roll_id)
-      if (oldRollId !== roll_id) {
-        await this.updateRollMeterAndStatus(client, oldRollId)
+          layer_information: data.layer_information !== undefined ? data.layer_information : existing.layer_information,
+          piece_count: data.piece_count !== undefined ? Number(data.piece_count) : existing.piece_count,
+          size: data.size !== undefined ? data.size : existing.size,
+          pana: data.pana !== undefined ? data.pana : existing.pana,
+          average: data.average !== undefined ? data.average : existing.average,
+          sort_number: data.sort_number !== undefined ? data.sort_number : existing.sort_number,
+          notes: data.notes !== undefined ? data.notes : existing.notes,
+          updated_at: new Date().toISOString()
+        }
       }
+    )
 
-      await client.query('COMMIT')
-      return await this.getById(id)
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    await this.updateRollMeterAndStatus(roll_id)
+    if (oldRollId !== roll_id) {
+      await this.updateRollMeterAndStatus(oldRollId)
     }
+
+    return await this.getById(numId)
   }
 
   static async delete(id: number) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('cutting_entries').findOne({ id: numId })
+    if (!existing) return null
 
-      const existingRes = await client.query('SELECT * FROM cutting_entries WHERE id = $1', [id])
-      const existing = existingRes.rows[0]
-      if (!existing) return null
+    await Promise.all([
+      db.collection('cutting_entries').deleteOne({ id: numId }),
+      db.collection('finished_goods').deleteMany({ cutting_id: numId })
+    ])
 
-      await client.query('DELETE FROM cutting_entries WHERE id = $1', [id])
-      await this.updateRollMeterAndStatus(client, existing.roll_id)
-
-      await client.query('COMMIT')
-      return existing
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
-    }
+    await this.updateRollMeterAndStatus(existing.roll_id)
+    const { _id, ...rest } = existing
+    return rest
   }
 }

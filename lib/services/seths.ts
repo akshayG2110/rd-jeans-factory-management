@@ -1,4 +1,4 @@
-import { query, getClient } from '../db'
+import { getMongoDb, getNextSequence } from '../mongodb'
 import { CashBookService } from './cashbook'
 
 export interface Seth {
@@ -14,62 +14,83 @@ export interface Seth {
 
 export class SethService {
   static async getAll(search?: string, status?: string) {
-    let sql = 'SELECT * FROM seths WHERE 1=1'
-    const params: any[] = []
+    const db = await getMongoDb()
+    const queryFilter: any = {}
 
     if (search) {
-      params.push(`%${search}%`)
-      sql += ` AND seth_name ILIKE $${params.length}`
+      queryFilter.seth_name = { $regex: search, $options: 'i' }
     }
     if (status) {
-      params.push(status)
-      sql += ` AND status = $${params.length}`
+      queryFilter.status = status
     }
 
-    sql += ' ORDER BY id DESC'
-    const res = await query(sql, params)
-    return res.rows
+    const seths = await db.collection('seths').find(queryFilter).sort({ id: -1 }).toArray()
+    return seths.map(({ _id, ...rest }) => rest)
   }
 
   static async getById(id: number) {
-    const res = await query('SELECT * FROM seths WHERE id = $1', [id])
-    return res.rows[0] || null
+    const db = await getMongoDb()
+    const seth = await db.collection('seths').findOne({ id: Number(id) })
+    if (!seth) return null
+    const { _id, ...rest } = seth
+    return rest
   }
 
   static async create(data: { seth_name: string; mobile_number?: string | null; address?: string | null; notes?: string | null; status?: string }) {
-    const status = data.status || 'Active'
-    const res = await query(
-      `INSERT INTO seths (seth_name, mobile_number, address, notes, status)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [data.seth_name, data.mobile_number || null, data.address || null, data.notes || null, status]
-    )
-    return res.rows[0]
+    const db = await getMongoDb()
+    const id = await getNextSequence('seths')
+    const now = new Date().toISOString()
+    const newSeth = {
+      id,
+      seth_name: data.seth_name,
+      mobile_number: data.mobile_number || null,
+      address: data.address || null,
+      notes: data.notes || null,
+      status: data.status || 'Active',
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('seths').insertOne(newSeth)
+    const { _id, ...rest } = newSeth as any
+    return rest
   }
 
   static async update(id: number, data: Partial<{ seth_name: string; mobile_number: string | null; address: string | null; notes: string | null; status: string }>) {
-    const existing = await this.getById(id)
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const existing = await db.collection('seths').findOne({ id: numId })
     if (!existing) return null
 
-    const seth_name = data.seth_name !== undefined ? data.seth_name : existing.seth_name
-    const mobile_number = data.mobile_number !== undefined ? data.mobile_number : existing.mobile_number
-    const address = data.address !== undefined ? data.address : existing.address
-    const notes = data.notes !== undefined ? data.notes : existing.notes
-    const status = data.status !== undefined ? data.status : existing.status
+    const updateFields: any = {
+      updated_at: new Date().toISOString()
+    }
+    if (data.seth_name !== undefined) updateFields.seth_name = data.seth_name
+    if (data.mobile_number !== undefined) updateFields.mobile_number = data.mobile_number
+    if (data.address !== undefined) updateFields.address = data.address
+    if (data.notes !== undefined) updateFields.notes = data.notes
+    if (data.status !== undefined) updateFields.status = data.status
 
-    const res = await query(
-      `UPDATE seths
-       SET seth_name = $1, mobile_number = $2, address = $3, notes = $4, status = $5, updated_at = NOW()
-       WHERE id = $6
-       RETURNING *`,
-      [seth_name, mobile_number, address, notes, status, id]
-    )
-    return res.rows[0]
+    await db.collection('seths').updateOne({ id: numId }, { $set: updateFields })
+    const updated = await db.collection('seths').findOne({ id: numId })
+    const { _id, ...rest } = updated as any
+    return rest
   }
 
   static async delete(id: number) {
-    const res = await query('DELETE FROM seths WHERE id = $1 RETURNING *', [id])
-    return res.rows[0] || null
+    const db = await getMongoDb()
+    const numId = Number(id)
+    const sethToDelete = await db.collection('seths').findOne({ id: numId })
+    if (!sethToDelete) return null
+
+    await Promise.all([
+      db.collection('seths').deleteOne({ id: numId }),
+      db.collection('seth_payments').deleteMany({ seth_id: numId }),
+      db.collection('rolls').deleteMany({ seth_id: numId })
+    ])
+
+    const { _id, ...rest } = sethToDelete
+    return rest
   }
 
   // Seth Payment Operations
@@ -80,54 +101,56 @@ export class SethService {
     notes?: string | null
     handled_by: string
   }) {
-    const client = await getClient()
-    try {
-      await client.query('BEGIN')
-
-      const sethRes = await client.query('SELECT seth_name FROM seths WHERE id = $1', [sethId])
-      if (sethRes.rows.length === 0) {
-        throw new Error(`Seth client with ID ${sethId} does not exist.`)
-      }
-      const sethName = sethRes.rows[0].seth_name
-
-      const paymentRes = await client.query(
-        `INSERT INTO seth_payments (seth_id, payment_date, amount, payment_method, notes, handled_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [sethId, data.payment_date, data.amount, data.payment_method, data.notes || null, data.handled_by]
-      )
-      const payment = paymentRes.rows[0]
-
-      await CashBookService.logTransaction(
-        payment.payment_date,
-        'Seth Payment',
-        sethName,
-        payment.payment_method,
-        parseFloat(payment.amount),
-        0,
-        payment.handled_by,
-        'Seth Payment',
-        payment.id,
-        payment.notes,
-        client,
-        { seth_payment_id: payment.id }
-      )
-
-      await client.query('COMMIT')
-      return payment
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
+    const db = await getMongoDb()
+    const numSethId = Number(sethId)
+    const seth = await db.collection('seths').findOne({ id: numSethId })
+    if (!seth) {
+      throw new Error(`Seth client with ID ${numSethId} does not exist.`)
     }
+
+    const id = await getNextSequence('seth_payments')
+    const now = new Date().toISOString()
+    const payment = {
+      id,
+      seth_id: numSethId,
+      payment_date: data.payment_date,
+      amount: Number(data.amount),
+      payment_method: data.payment_method,
+      notes: data.notes || null,
+      handled_by: data.handled_by,
+      created_at: now,
+      updated_at: now
+    }
+
+    await db.collection('seth_payments').insertOne(payment)
+
+    await CashBookService.logTransaction(
+      payment.payment_date,
+      'Seth Payment',
+      seth.seth_name,
+      payment.payment_method,
+      Number(payment.amount),
+      0,
+      payment.handled_by,
+      'Seth Payment',
+      payment.id,
+      payment.notes,
+      undefined,
+      { seth_payment_id: payment.id }
+    )
+
+    const { _id, ...rest } = payment as any
+    return rest
   }
 
   static async getPayments(sethId: number) {
-    const res = await query(
-      'SELECT * FROM seth_payments WHERE seth_id = $1 ORDER BY payment_date DESC, id DESC',
-      [sethId]
-    )
-    return res.rows
+    const db = await getMongoDb()
+    const numSethId = Number(sethId)
+    const payments = await db
+      .collection('seth_payments')
+      .find({ seth_id: numSethId })
+      .sort({ payment_date: -1, id: -1 })
+      .toArray()
+    return payments.map(({ _id, ...rest }) => rest)
   }
 }
