@@ -51,6 +51,7 @@ async function cleanDatabase() {
       'incomes',
       'expenses',
       'cash_book_ledger',
+      'partners',
       'partner_transactions',
       'attendance',
       'audit_logs',
@@ -78,44 +79,7 @@ async function cleanDatabase() {
     })
     console.log('  - factory_balance: set to ₹0.00')
 
-    // 4. Reset partners (Keep Rajubhai & Dhruveshbhai with 0.00 balance)
-    console.log('\nResetting partners...')
-    await db.collection('partners').deleteMany({})
-    await db.collection('partners').insertMany([
-      {
-        id: 1,
-        name: 'Rajubhai',
-        mobile_number: null,
-        profit_share_percentage: 50.0,
-        opening_balance: 0.0,
-        current_balance: 0.0,
-        status: 'Active',
-        notes: 'Co-Founder & Managing Partner',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      },
-      {
-        id: 2,
-        name: 'Dhruveshbhai',
-        mobile_number: null,
-        profit_share_percentage: 50.0,
-        opening_balance: 0.0,
-        current_balance: 0.0,
-        status: 'Active',
-        notes: 'Co-Founder & Financial Partner',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-    ])
-    // Initialize partner sequence to 2
-    await db.collection('counters').updateOne(
-      { _id: 'partners' },
-      { $set: { seq: 2 } },
-      { upsert: true }
-    )
-    console.log('  - partners: reset Rajubhai & Dhruveshbhai to ₹0.00 balance (seq initialized to 2)')
-
-    // 5. Ensure admin user (rdjeans123) is preserved and clean
+    // 4. Ensure admin user (rdjeans123) is preserved and clean
     console.log('\nEnsuring admin user (rdjeans123)...')
     await db.collection('users').deleteMany({})
     const salt = await bcrypt.genSalt(10)
