@@ -1,80 +1,164 @@
-import { Pool } from 'pg'
+import { MongoClient } from 'mongodb'
 import fs from 'fs'
+import bcrypt from 'bcryptjs'
 
-const envContent = fs.readFileSync('.env.local', 'utf8')
-let dbUrl = ''
-for (const line of envContent.split('\n')) {
-  if (line.startsWith('DATABASE_URL=')) {
-    dbUrl = line.split('=')[1].trim()
+// Load environment variables from .env.local if present
+let mongoUri = process.env.MONGODB_URI || ''
+let dbName = process.env.MONGODB_DB || 'rd_jeans_factory'
+
+if (fs.existsSync('.env.local')) {
+  const envContent = fs.readFileSync('.env.local', 'utf8')
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('MONGODB_URI=') && !mongoUri) {
+      mongoUri = trimmed.substring('MONGODB_URI='.length).trim()
+    }
+    if (trimmed.startsWith('MONGODB_DB=') && dbName === 'rd_jeans_factory') {
+      dbName = trimmed.substring('MONGODB_DB='.length).trim()
+    }
   }
 }
 
-const pool = new Pool({ connectionString: dbUrl })
+if (!mongoUri) {
+  console.error('Error: MONGODB_URI is not set in environment or .env.local')
+  process.exit(1)
+}
 
-async function cleanSeedData() {
-  const client = await pool.connect()
+const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 8000 })
+
+async function cleanDatabase() {
   try {
-    console.log('Cleaning seed data from database...')
-    await client.query('BEGIN')
+    console.log('================================================================')
+    console.log('       RD JEANS FACTORY - RESET & CLEAN DATABASE SCRIPT         ')
+    console.log('================================================================\n')
+    console.log(`Connecting to MongoDB Atlas database: ${dbName}...`)
+    await client.connect()
+    console.log('✓ Connected successfully!\n')
 
-    // 1. Truncate all transactional and master seed data tables with CASCADE and RESTART IDENTITY
-    const tablesToTruncate = [
-      'finished_goods',
-      'cutting_entries',
-      'rolls',
-      'seth_payments',
+    const db = client.db(dbName)
+
+    // 1. Transactional and master collections to completely empty
+    const collectionsToClean = [
+      'employees',
       'seths',
-      'salary_payments',
+      'seth_payments',
+      'rolls',
+      'cutting_entries',
+      'finished_goods',
       'salaries',
       'upad_records',
-      'employee_advances',
-      'attendance',
-      'employees',
-      'expenses',
-      'factory_expenses',
       'incomes',
+      'expenses',
       'cash_book_ledger',
-      'cash_book',
       'partner_transactions',
-      'audit_logs'
+      'attendance',
+      'audit_logs',
+      'system_checks'
     ]
 
-    console.log(`Truncating tables: ${tablesToTruncate.join(', ')}...`)
-    await client.query(`TRUNCATE TABLE ${tablesToTruncate.map(t => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE;`)
-
-    // 2. Reset factory_balance to 0.00
-    console.log('Resetting factory_balance to 0.00...')
-    await client.query(`UPDATE factory_balance SET current_balance = 0.00, last_updated = CURRENT_TIMESTAMP;`)
-
-    // 3. Reset partner balances to 0.00
-    console.log('Resetting partner opening and current balances to 0.00...')
-    await client.query(`UPDATE partners SET opening_balance = 0.00, current_balance = 0.00, updated_at = CURRENT_TIMESTAMP;`)
-
-    await client.query('COMMIT')
-    console.log('✓ Successfully cleaned all seed data and reset all records to 0!')
-
-    // Print summary
-    console.log('\n--- VERIFYING TABLE ROW COUNTS ---')
-    const allTables = [...tablesToTruncate, 'factory_balance', 'partners', 'users']
-    for (const t of allTables) {
-      const res = await client.query(`SELECT count(*) FROM "${t}"`)
-      console.log(`${t}: ${res.rows[0].count} rows`)
+    console.log('Clearing all transactional and operational data...')
+    for (const colName of collectionsToClean) {
+      const res = await db.collection(colName).deleteMany({})
+      console.log(`  - ${colName}: deleted ${res.deletedCount} documents`)
     }
 
-    const balRes = await client.query(`SELECT current_balance FROM factory_balance LIMIT 1`)
-    console.log(`Factory balance: ₹${balRes.rows[0]?.current_balance || '0.00'}`)
+    // 2. Reset ID counters so next entries start from sequence ID 1
+    console.log('\nResetting all ID counters...')
+    await db.collection('counters').deleteMany({})
+    console.log('  - counters: cleared (next inserts will start with ID 1)')
 
-    const partnerRes = await client.query(`SELECT name, opening_balance, current_balance FROM partners`)
-    console.log('Partners:', partnerRes.rows)
+    // 3. Reset factory_balance to 0.00
+    console.log('\nResetting factory_balance to 0.00...')
+    await db.collection('factory_balance').deleteMany({})
+    await db.collection('factory_balance').insertOne({
+      id: 1,
+      current_balance: 0.0,
+      last_updated: new Date().toISOString()
+    })
+    console.log('  - factory_balance: set to ₹0.00')
+
+    // 4. Reset partners (Keep Rajubhai & Dhruveshbhai with 0.00 balance)
+    console.log('\nResetting partners...')
+    await db.collection('partners').deleteMany({})
+    await db.collection('partners').insertMany([
+      {
+        id: 1,
+        name: 'Rajubhai',
+        mobile_number: null,
+        profit_share_percentage: 50.0,
+        opening_balance: 0.0,
+        current_balance: 0.0,
+        status: 'Active',
+        notes: 'Co-Founder & Managing Partner',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 2,
+        name: 'Dhruveshbhai',
+        mobile_number: null,
+        profit_share_percentage: 50.0,
+        opening_balance: 0.0,
+        current_balance: 0.0,
+        status: 'Active',
+        notes: 'Co-Founder & Financial Partner',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ])
+    // Initialize partner sequence to 2
+    await db.collection('counters').updateOne(
+      { _id: 'partners' },
+      { $set: { seq: 2 } },
+      { upsert: true }
+    )
+    console.log('  - partners: reset Rajubhai & Dhruveshbhai to ₹0.00 balance (seq initialized to 2)')
+
+    // 5. Ensure admin user (rdjeans123) is preserved and clean
+    console.log('\nEnsuring admin user (rdjeans123)...')
+    await db.collection('users').deleteMany({})
+    const salt = await bcrypt.genSalt(10)
+    const hash = await bcrypt.hash('RD@123', salt)
+    await db.collection('users').insertOne({
+      id: 1,
+      username: 'rdjeans123',
+      password_hash: hash,
+      created_at: new Date().toISOString()
+    })
+    await db.collection('counters').updateOne(
+      { _id: 'users' },
+      { $set: { seq: 1 } },
+      { upsert: true }
+    )
+    console.log('  - users: default user rdjeans123 configured')
+
+    console.log('\n================================================================')
+    console.log('               DATABASE CLEANUP VERIFICATION                    ')
+    console.log('================================================================')
+    const allCollections = [
+      ...collectionsToClean,
+      'factory_balance',
+      'partners',
+      'users',
+      'counters'
+    ]
+    for (const c of allCollections) {
+      const count = await db.collection(c).countDocuments()
+      console.log(`  - ${c.padEnd(25)}: ${count} documents`)
+    }
+
+    console.log('\n✓ All sample/test data has been successfully cleared!')
+    console.log('✓ Factory balance and partner balances are at ₹0.00')
+    console.log('✓ Counters are reset to start fresh at ID 1')
+    console.log('✓ Admin user rdjeans123 is ready for login\n')
+    process.exit(0)
   } catch (err) {
-    await client.query('ROLLBACK')
-    console.error('Failed to clean seed data:', err)
+    console.error('❌ Database cleanup failed:', err)
     process.exit(1)
   } finally {
-    client.release()
-    await pool.end()
+    await client.close()
   }
 }
 
-cleanSeedData().catch(console.error)
-
+cleanDatabase()
