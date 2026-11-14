@@ -5,8 +5,7 @@ import { MongoClient, Db, MongoClientOptions } from 'mongodb'
 const defaultDbName = process.env.MONGODB_DB || 'rd_jeans_factory'
 
 const options: MongoClientOptions = {
-  maxPoolSize: 20,
-  minPoolSize: 1,
+  maxPoolSize: 10,
   serverSelectionTimeoutMS: 8000,
   connectTimeoutMS: 10000,
 }
@@ -33,14 +32,20 @@ export async function getMongoClient(): Promise<MongoClient> {
   if (process.env.NODE_ENV === 'development') {
     if (!global._mongoClientPromise) {
       const client = new MongoClient(uri, options)
-      global._mongoClientPromise = client.connect()
+      global._mongoClientPromise = client.connect().catch(err => {
+        global._mongoClientPromise = undefined
+        throw err
+      })
     }
     return await global._mongoClientPromise
   }
 
   if (!clientPromise) {
     const client = new MongoClient(uri, options)
-    clientPromise = client.connect()
+    clientPromise = client.connect().catch(err => {
+      clientPromise = null
+      throw err
+    })
   }
 
   return await clientPromise
