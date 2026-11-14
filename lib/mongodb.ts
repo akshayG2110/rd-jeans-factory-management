@@ -1,38 +1,48 @@
 import { MongoClient, Db, MongoClientOptions } from 'mongodb'
 
-const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/rd_jeans_factory'
+import { MongoClient, Db, MongoClientOptions } from 'mongodb'
+
 const defaultDbName = process.env.MONGODB_DB || 'rd_jeans_factory'
 
 const options: MongoClientOptions = {
   maxPoolSize: 20,
-  minPoolSize: 2,
+  minPoolSize: 1,
   serverSelectionTimeoutMS: 8000,
   connectTimeoutMS: 10000,
 }
 
-let client: MongoClient
-let clientPromise: Promise<MongoClient>
+let clientPromise: Promise<MongoClient> | null = null
 
 declare global {
   // eslint-disable-next-line no-var
   var _mongoClientPromise: Promise<MongoClient> | undefined
 }
 
-if (process.env.NODE_ENV === 'development') {
-  if (!global._mongoClientPromise) {
-    client = new MongoClient(uri, options)
-    global._mongoClientPromise = client.connect()
-  }
-  clientPromise = global._mongoClientPromise
-} else {
-  client = new MongoClient(uri, options)
-  clientPromise = client.connect()
-}
-
 /**
  * Returns the connected MongoClient instance
  */
 export async function getMongoClient(): Promise<MongoClient> {
+  const uri = process.env.MONGODB_URI
+
+  if (!uri) {
+    throw new Error(
+      'Environment variable MONGODB_URI is not configured in Vercel Project Settings. Please add MONGODB_URI in Vercel -> Settings -> Environment Variables and redeploy.'
+    )
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    if (!global._mongoClientPromise) {
+      const client = new MongoClient(uri, options)
+      global._mongoClientPromise = client.connect()
+    }
+    return await global._mongoClientPromise
+  }
+
+  if (!clientPromise) {
+    const client = new MongoClient(uri, options)
+    clientPromise = client.connect()
+  }
+
   return await clientPromise
 }
 
@@ -57,4 +67,4 @@ export async function getNextSequence(collectionName: string): Promise<number> {
   return result?.seq || 1
 }
 
-export default clientPromise
+export default getMongoClient
