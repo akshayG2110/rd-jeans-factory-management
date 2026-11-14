@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   try {
-    await ensureDefaultUser()
     const body = await request.json()
     const { username, password } = body
 
@@ -15,7 +14,16 @@ export async function POST(request: Request) {
     }
 
     const db = await getMongoDb()
-    const user = await db.collection('users').findOne({ username })
+    let user = await db.collection('users').findOne({ username })
+
+    // Only attempt default user seed if users collection is completely empty
+    if (!user) {
+      const userCount = await db.collection('users').countDocuments()
+      if (userCount === 0) {
+        await ensureDefaultUser()
+        user = await db.collection('users').findOne({ username })
+      }
+    }
 
     if (!user) {
       return NextResponse.json({ success: false, detail: 'Invalid username or password' }, { status: 401 })

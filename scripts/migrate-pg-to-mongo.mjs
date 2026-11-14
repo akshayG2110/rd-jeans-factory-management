@@ -1,4 +1,12 @@
-import { Pool } from 'pg'
+// Note: This was a one-time migration utility from PostgreSQL to MongoDB Atlas.
+// To run this script, pg must be installed locally.
+let Pool: any = null
+try {
+  const pgModule = await import('pg')
+  Pool = pgModule.Pool || pgModule.default?.Pool
+} catch {
+  // pg is no longer a runtime dependency
+}
 import { MongoClient } from 'mongodb'
 import fs from 'fs'
 

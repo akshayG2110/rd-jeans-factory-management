@@ -1,5 +1,12 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
 
+type InvalidateListener = () => void
+const mutationListeners: InvalidateListener[] = []
+
+export function onApiMutation(listener: InvalidateListener) {
+  mutationListeners.push(listener)
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   let urlStr = typeof input === "string" ? input : (input as any).url || String(input)
 
@@ -47,6 +54,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
         document.cookie = "rd_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
         document.cookie = "is_authenticated=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
         window.location.href = "/login?error=session_expired"
+      }
+    }
+
+    if (response.ok) {
+      const method = (init?.method || "GET").toUpperCase()
+      if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
+        mutationListeners.forEach(fn => {
+          try { fn() } catch {}
+        })
       }
     }
 

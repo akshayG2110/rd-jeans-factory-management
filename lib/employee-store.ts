@@ -1,6 +1,6 @@
 "use client"
 
-import { apiFetch } from "./api"
+import { apiFetch, onApiMutation } from "./api"
 
 export interface Transaction {
   id: string
@@ -1570,7 +1570,14 @@ export async function fetchPartnerTransactions(partnerName?: string): Promise<Pa
 // In-flight request deduplication and caching for getStoredData
 let inFlightStoredDataPromise: Promise<typeof FALLBACK_STORE> | null = null
 let lastStoredDataFetchTime = 0
-const STORED_DATA_TTL_MS = 1000
+const STORED_DATA_TTL_MS = 15000
+
+export function invalidateStoredDataCache() {
+  lastStoredDataFetchTime = 0
+  inFlightStoredDataPromise = null
+}
+
+onApiMutation(() => invalidateStoredDataCache())
 
 export async function getStoredData(forceRefresh = false) {
   const now = Date.now()

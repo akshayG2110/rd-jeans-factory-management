@@ -5,33 +5,34 @@ export class DashboardService {
   static async getMetrics() {
     const db = await getMongoDb()
 
+    const sumField = async (colName: string, fieldName: string): Promise<number> => {
+      const res = await db.collection(colName).aggregate([
+        { $group: { _id: null, total: { $sum: `$${fieldName}` } } }
+      ]).toArray()
+      return res[0]?.total || 0
+    }
+
     const [
       activeEmpCount,
-      allUpads,
-      allSalaries,
+      totalUpad,
+      totalSalary,
       activeRollsCount,
-      allCuts,
-      allExpenses,
-      allIncomes,
+      totalPiecesCut,
+      totalExpenses,
+      totalIncome,
       recentActivities,
       cashSummary
     ] = await Promise.all([
       db.collection('employees').countDocuments({ status: 'Active' }),
-      db.collection('upad_records').find({}).toArray(),
-      db.collection('salaries').find({}).toArray(),
+      sumField('upad_records', 'amount'),
+      sumField('salaries', 'paid_amount'),
       db.collection('rolls').countDocuments({ status: { $ne: 'Completed' } }),
-      db.collection('cutting_entries').find({}).toArray(),
-      db.collection('expenses').find({}).toArray(),
-      db.collection('incomes').find({}).toArray(),
+      sumField('cutting_entries', 'piece_count'),
+      sumField('expenses', 'amount'),
+      sumField('incomes', 'amount'),
       db.collection('cash_book_ledger').find({}).sort({ id: -1 }).limit(10).toArray(),
       CashBookService.getDashboardSummary()
     ])
-
-    const totalUpad = allUpads.reduce((sum, u) => sum + (Number(u.amount) || 0), 0)
-    const totalSalary = allSalaries.reduce((sum, s) => sum + (Number(s.paid_amount) || 0), 0)
-    const totalPiecesCut = allCuts.reduce((sum, c) => sum + (Number(c.piece_count) || 0), 0)
-    const totalExpenses = allExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
-    const totalIncome = allIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0)
 
     return {
       total_employees: activeEmpCount,
