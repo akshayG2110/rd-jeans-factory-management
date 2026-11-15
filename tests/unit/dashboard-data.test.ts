@@ -7,6 +7,8 @@ describe('lib/dashboard-data.ts static config and schemas', () => {
     const expectedModuleNames = [
       'Employees',
       'Upad',
+      'Seth',
+      'Hisab Seth',
       'Cutting',
       'Roll Inventory',
       'Cash Book',
@@ -19,7 +21,7 @@ describe('lib/dashboard-data.ts static config and schemas', () => {
 
     // Assert
     expect(modules).toBeDefined()
-    expect(modules.length).toBe(11)
+    expect(modules.length).toBe(12)
     for (const expected of expectedModuleNames) {
       expect(moduleNames).toContain(expected)
     }

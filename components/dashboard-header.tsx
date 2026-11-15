@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
+import { Cloud } from "lucide-react"
 
 export function DashboardHeader() {
   const [dateStr, setDateStr] = useState("")
@@ -40,12 +42,22 @@ export function DashboardHeader() {
         <p className="text-right text-[11px] font-semibold text-muted-foreground">
           {dateStr}
         </p>
-        <button
-          onClick={handleLogout}
-          className="rounded-full bg-secondary hover:bg-muted px-3 py-1 text-[10px] font-extrabold text-foreground ring-1 ring-border transition-all active:scale-95"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-1.5">
+          <Link
+            href="/google-sheets"
+            className="flex items-center gap-1 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/30 transition-all active:scale-95"
+            title="Google Sheets Live Sync for all factory modules"
+          >
+            <Cloud className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+            <span>Sheets Sync</span>
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="rounded-full bg-secondary hover:bg-muted px-2.5 py-1 text-[10px] font-extrabold text-foreground ring-1 ring-border transition-all active:scale-95"
+          >
+            Logout
+          </button>
+        </div>
       </div>
     </header>
   )

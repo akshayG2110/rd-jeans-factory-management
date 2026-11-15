@@ -1747,3 +1747,135 @@ export function getRecentMonthsOptions(count = 6) {
   }
   return months;
 }
+
+export interface SethHisabLot {
+  cutting_id: number
+  lot_number: string
+  cutting_date: string
+  roll_id: number
+  roll_number: string
+  fabric_type: string
+  meter_used: number
+  piece_count: number
+  stitching_status: string
+  rate_per_piece: number
+  amount: number
+  average?: number | null
+}
+
+export interface SethHisabRecord {
+  id: number
+  hisab_number: string
+  seth_id: number
+  seth_name: string
+  hisab_date: string
+  lots: SethHisabLot[]
+  total_pieces: number
+  total_meter_used: number
+  average_consumption: number
+  stitching_amount: number
+  extra_charges: number
+  extra_charges_notes?: string | null
+  deductions: number
+  deductions_notes?: string | null
+  total_amount: number
+  paid_amount: number
+  balance_amount: number
+  payment_status: 'Paid' | 'Partially Paid' | 'Unpaid'
+  payment_method: string
+  handled_by: string
+  notes?: string | null
+  linked_payment_id?: number | null
+  created_at: string
+  updated_at: string
+}
+
+export async function fetchSethHisabOverview(sethId?: string) {
+  try {
+    const url = sethId ? `${API_BASE}/hisab-seth/overview?seth_id=${sethId}` : `${API_BASE}/hisab-seth/overview`
+    const res = await apiFetch(url)
+    const json = await res.json()
+    if (json.success && json.data) {
+      return json.data
+    }
+  } catch (err) {
+    console.error("fetchSethHisabOverview failed", err)
+  }
+  return null
+}
+
+export async function fetchSethHisabs(filters?: { sethId?: string; status?: string; search?: string }): Promise<SethHisabRecord[]> {
+  try {
+    const params = new URLSearchParams()
+    if (filters?.sethId) params.append('seth_id', filters.sethId)
+    if (filters?.status) params.append('status', filters.status)
+    if (filters?.search) params.append('search', filters.search)
+    const url = `${API_BASE}/hisab-seth${params.toString() ? '?' + params.toString() : ''}`
+    const res = await apiFetch(url)
+    const json = await res.json()
+    if (json.success && json.data) {
+      return json.data
+    }
+  } catch (err) {
+    console.error("fetchSethHisabs failed", err)
+  }
+  return []
+}
+
+export async function createSethHisab(payload: any): Promise<SethHisabRecord | null> {
+  try {
+    const res = await apiFetch(`${API_BASE}/hisab-seth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    const json = await res.json()
+    if (json.success && json.data) {
+      return json.data
+    }
+  } catch (err) {
+    console.error("createSethHisab failed", err)
+  }
+  return null
+}
+
+export async function addSethHisabPayment(hisabId: string | number, payment: any) {
+  try {
+    const res = await apiFetch(`${API_BASE}/hisab-seth/${hisabId}/payment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payment)
+    })
+    return await res.json()
+  } catch (err) {
+    console.error("addSethHisabPayment failed", err)
+    return { success: false, detail: "Network error" }
+  }
+}
+
+export async function deleteSethHisab(hisabId: string | number) {
+  try {
+    const res = await apiFetch(`${API_BASE}/hisab-seth/${hisabId}`, {
+      method: "DELETE"
+    })
+    return await res.json()
+  } catch (err) {
+    console.error("deleteSethHisab failed", err)
+    return { success: false, detail: "Network error" }
+  }
+}
+
+export async function updateLotStitchingStatus(cuttingId: string | number, status: string) {
+  try {
+    const res = await apiFetch(`${API_BASE}/hisab-seth/stitching`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cutting_id: cuttingId, status })
+    })
+    return await res.json()
+  } catch (err) {
+    console.error("updateLotStitchingStatus failed", err)
+    return { success: false, detail: "Network error" }
+  }
+}
+

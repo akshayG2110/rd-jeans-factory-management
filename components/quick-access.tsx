@@ -1,15 +1,27 @@
 import { modules } from "@/lib/dashboard-data"
 import Link from "next/link"
+import { Cloud } from "lucide-react"
 
 export function QuickAccess() {
   return (
     <section>
-      <h2 className="mb-3 text-base font-bold text-foreground">Quick Access</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-bold text-foreground">Quick Access</h2>
+        <Link
+          href="/google-sheets"
+          className="flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[10px] font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all"
+          title="Live Google Sheets sync for all 12 modules"
+        >
+          <Cloud className="h-3 w-3 text-emerald-600" />
+          <span>Sheets Sync</span>
+        </Link>
+      </div>
       <div className="grid grid-cols-4 gap-3 md:grid-cols-6">
         {modules.map((mod) => {
           const isEmployees = mod.name === "Employees"
           const isUpad = mod.name === "Upad"
           const isSeth = mod.name === "Seth"
+          const isHisabSeth = mod.name === "Hisab Seth"
           const isRollInventory = mod.name === "Roll Inventory"
           const isCutting = mod.name === "Cutting"
           const isFinishedGoods = mod.name === "Finished Goods"
@@ -18,7 +30,7 @@ export function QuickAccess() {
           const isExpense = mod.name === "Expense"
           const isCashBook = mod.name === "Cash Book"
           const isReports = mod.name === "Reports"
-          const Component = (isEmployees || isUpad || isSeth || isRollInventory || isCutting || isFinishedGoods || isPartner || isIncome || isExpense || isCashBook || isReports) ? Link : "button"
+          const Component = (isEmployees || isUpad || isSeth || isHisabSeth || isRollInventory || isCutting || isFinishedGoods || isPartner || isIncome || isExpense || isCashBook || isReports) ? Link : "button"
           
           let props = {} as any
           if (isEmployees) {
@@ -27,6 +39,8 @@ export function QuickAccess() {
             props = { href: "/upad" }
           } else if (isSeth) {
             props = { href: "/seths" }
+          } else if (isHisabSeth) {
+            props = { href: "/hisab-seth" }
           } else if (isRollInventory) {
             props = { href: "/rolls" }
           } else if (isCutting) {

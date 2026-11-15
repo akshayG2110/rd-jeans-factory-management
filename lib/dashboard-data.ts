@@ -11,6 +11,7 @@ import {
   TrendingDown,
   BookOpen,
   BarChart3,
+  Calculator,
   type LucideIcon,
 } from "lucide-react"
 
@@ -43,6 +44,13 @@ export const modules: Module[] = [
     icon: Building2,
     iconColor: "text-primary",
     iconBg: "bg-primary/10",
+  },
+  {
+    name: "Hisab Seth",
+    description: "Cutting & roll hisab",
+    icon: Calculator,
+    iconColor: "text-[#0284c7]",
+    iconBg: "bg-[#0284c7]/10",
   },
   {
     name: "Cutting",

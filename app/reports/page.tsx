@@ -25,7 +25,8 @@ import {
   ChevronRight,
   Info,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Cloud
 } from "lucide-react"
 
 const REPORT_CATEGORIES = [
@@ -265,17 +266,27 @@ export default function ReportsPage() {
       <div className="mx-auto flex max-w-2xl flex-col gap-6 px-5 py-6 pb-24">
         
         {/* Header */}
-        <header className="flex items-center gap-3.5">
-          <Link 
-            href="/" 
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-card shadow-sm ring-1 ring-border/60 transition-transform active:scale-90 hover:bg-muted"
-          >
-            <ArrowLeft className="h-5 w-5 text-foreground" />
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground">ERP Reports Center</h1>
-            <p className="text-xs text-muted-foreground">Dynamic Business Ledgers & Exports</p>
+        <header className="flex items-center justify-between gap-3.5">
+          <div className="flex items-center gap-3.5">
+            <Link 
+              href="/" 
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-card shadow-sm ring-1 ring-border/60 transition-transform active:scale-90 hover:bg-muted"
+            >
+              <ArrowLeft className="h-5 w-5 text-foreground" />
+            </Link>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-foreground">ERP Reports Center</h1>
+              <p className="text-xs text-muted-foreground">Dynamic Business Ledgers & Exports</p>
+            </div>
           </div>
+          <Link
+            href="/google-sheets"
+            className="flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all"
+            title="Google Sheets Live Sync for all factory reports & modules"
+          >
+            <Cloud className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">Sheets Sync</span>
+          </Link>
         </header>
 
         {/* Banner notification */}

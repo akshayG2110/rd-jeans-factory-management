@@ -156,6 +156,14 @@ export default function SethDetailsPage({ params }: Props) {
               <p className="text-base font-bold mt-0.5">{seth.totalCuttingPieces.toLocaleString("en-IN")} pcs</p>
             </div>
           </div>
+
+          <Link
+            href={`/hisab-seth?seth_id=${seth.id}`}
+            className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-primary-foreground/20 py-2.5 px-4 text-xs font-extrabold text-primary-foreground hover:bg-primary-foreground/30 transition-all active:scale-98 shadow-xs"
+          >
+            <Calculator className="h-4 w-4" />
+            <span>Open Seth Hisab & Work Settlement</span>
+          </Link>
         </div>
 
         {/* Navigation Tabs */}
