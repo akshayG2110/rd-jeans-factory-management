@@ -43,7 +43,12 @@ import {
   RefreshCw,
   Phone,
   MapPin,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Search,
+  Filter,
+  Activity,
+  Power,
+  PowerOff
 } from "lucide-react"
 
 export default function SuperAdminPortalPage() {
@@ -51,12 +56,50 @@ export default function SuperAdminPortalPage() {
   const [mounted, setMounted] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(true)
   const [activeTab, setActiveTab] = useState<
-    "visibility" | "dropdowns" | "profile" | "users" | "backup" | "stats"
-  >("visibility")
+    "organizations" | "visibility" | "dropdowns" | "profile" | "users" | "backup" | "stats"
+  >("organizations")
+
+  // Multi-Organization State
+  const [organizations, setOrganizations] = useState<any[]>([])
+  const [activeOrgSlug, setActiveOrgSlug] = useState<string>("rd-jeans-main")
+  const [isCreateOrgModalOpen, setIsCreateOrgModalOpen] = useState(false)
+  const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false)
+  const [editingOrg, setEditingOrg] = useState<any>(null)
+  const [isSavingOrg, setIsSavingOrg] = useState(false)
+  const [orgSearchQuery, setOrgSearchQuery] = useState("")
+  const [orgStatusFilter, setOrgStatusFilter] = useState<"all" | "active" | "inactive">("all")
+  const [tenantPing, setTenantPing] = useState<Record<string, { latency_ms: number; status: string; loading?: boolean }>>({})
+  const [togglingOrgSlug, setTogglingOrgSlug] = useState<string | null>(null)
+  const [newOrgForm, setNewOrgForm] = useState({
+    name: "",
+    slug: "",
+    owner_name: "",
+    phone: "",
+    address: "",
+    gstin: "",
+    initial_username: "",
+    initial_password: "",
+    default_stitching_rate: 45,
+    default_washing_rate: 5,
+    modules: {
+      employees: true,
+      upad: true,
+      seths: true,
+      hisab_seth: true,
+      cutting: true,
+      finished_goods: true,
+      rolls: true,
+      partners: true,
+      income: true,
+      expense: true,
+      cashbook: true,
+      reports: true
+    }
+  })
 
   // Master Settings State
   const [settings, setSettings] = useState<any>({
-    company_name: "Akshay RD Jeans Factory",
+    company_name: "DenimFlow ERP",
     owner_name: "Akshay Gohel",
     phone: "",
     email: "",
@@ -81,10 +124,14 @@ export default function SuperAdminPortalPage() {
   const [newCategoryLabel, setNewCategoryLabel] = useState("")
 
   // Staff Users State
+  const [currentSuperAdminUser, setCurrentSuperAdminUser] = useState<string>("SuperAdmin")
   const [users, setUsers] = useState<any[]>([])
   const [isUserModalOpen, setIsUserModalOpen] = useState(false)
   const [userModalMode, setUserModalMode] = useState<"create" | "edit">("create")
   const [selectedUser, setSelectedUser] = useState<any>(null)
+  const [userSearchQuery, setUserSearchQuery] = useState("")
+  const [userStatusFilter, setUserStatusFilter] = useState<"all" | "active" | "inactive">("all")
+  const [togglingUserId, setTogglingUserId] = useState<string | number | null>(null)
   const [userForm, setUserForm] = useState({
     username: "",
     password: "",
@@ -114,10 +161,11 @@ export default function SuperAdminPortalPage() {
   // Load Data
   const loadData = async () => {
     try {
-      const [settingsRes, usersRes, statsRes] = await Promise.all([
+      const [settingsRes, usersRes, statsRes, orgsRes] = await Promise.all([
         fetch("/api/super-admin/settings").then((r) => r.json()),
         fetch("/api/super-admin/users").then((r) => r.json()),
-        fetch("/api/super-admin/stats").then((r) => r.json())
+        fetch("/api/super-admin/stats").then((r) => r.json()),
+        fetch("/api/organizations").then((r) => r.json()).catch(() => ({ success: false }))
       ])
 
       if (settingsRes.success && settingsRes.data) {
@@ -129,8 +177,266 @@ export default function SuperAdminPortalPage() {
       if (statsRes.success && statsRes.data) {
         setStats(statsRes.data)
       }
+      if (orgsRes.success && orgsRes.data) {
+        setOrganizations(orgsRes.data.organizations || [])
+        if (orgsRes.data.activeSlug) {
+          setActiveOrgSlug(orgsRes.data.activeSlug)
+        }
+      }
     } catch {
       showFeedback("error", "Failed to load super admin settings")
+    }
+  }
+
+  // Handle Switch Organization from Super Admin
+  const handleSwitchOrgFromAdmin = async (slug: string) => {
+    try {
+      const res = await fetch("/api/organizations/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        setActiveOrgSlug(slug)
+        showFeedback("success", `Switched active organization to "${json.data?.organizationName || slug}"`)
+        loadData()
+      } else {
+        showFeedback("error", json.detail || "Failed to switch organization")
+      }
+    } catch (e: any) {
+      showFeedback("error", e.message)
+    }
+  }
+
+  // Handle Create Organization
+  const handleCreateOrganization = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSavingOrg(true)
+    try {
+      const res = await fetch("/api/organizations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newOrgForm.name,
+          slug: newOrgForm.slug,
+          owner_name: newOrgForm.owner_name,
+          phone: newOrgForm.phone,
+          address: newOrgForm.address,
+          gstin: newOrgForm.gstin,
+          initial_username: newOrgForm.initial_username,
+          initial_password: newOrgForm.initial_password,
+          settings: {
+            default_stitching_rate: Number(newOrgForm.default_stitching_rate) || 45,
+            default_washing_rate: Number(newOrgForm.default_washing_rate) || 5,
+          },
+          module_visibility: newOrgForm.modules,
+        }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showFeedback("success", json.message || "Organization created successfully!")
+        setIsCreateOrgModalOpen(false)
+        setNewOrgForm({
+          name: "",
+          slug: "",
+          owner_name: "",
+          phone: "",
+          address: "",
+          gstin: "",
+          initial_username: "",
+          initial_password: "",
+          default_stitching_rate: 45,
+          default_washing_rate: 5,
+          modules: {
+            employees: true,
+            upad: true,
+            seths: true,
+            hisab_seth: true,
+            cutting: true,
+            finished_goods: true,
+            rolls: true,
+            partners: true,
+            income: true,
+            expense: true,
+            cashbook: true,
+            reports: true
+          }
+        })
+        loadData()
+      } else {
+        showFeedback("error", json.detail || "Failed to create organization")
+      }
+    } catch (e: any) {
+      showFeedback("error", e.message)
+    } finally {
+      setIsSavingOrg(false)
+    }
+  }
+
+  // Handle Open Edit Org
+  const handleOpenEditOrg = (org: any) => {
+    setEditingOrg({
+      ...org,
+      name: org.name,
+      owner_name: org.owner_name || "",
+      phone: org.phone || "",
+      address: org.address || "",
+      gstin: org.gstin || "",
+      status: org.status || "Active",
+      google_sheets_webhook_url: org.settings?.google_sheets_webhook_url || "",
+      default_stitching_rate: org.settings?.default_stitching_rate ?? 45,
+      default_washing_rate: org.settings?.default_washing_rate ?? 5,
+      module_visibility: {
+        ...org.module_visibility,
+      },
+    })
+    setIsEditOrgModalOpen(true)
+  }
+
+  // Handle Save Edit Org
+  const handleSaveEditOrg = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingOrg) return
+    setIsSavingOrg(true)
+    try {
+      const res = await fetch(`/api/organizations/${editingOrg.slug}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editingOrg.name,
+          owner_name: editingOrg.owner_name,
+          phone: editingOrg.phone,
+          address: editingOrg.address,
+          gstin: editingOrg.gstin,
+          status: editingOrg.status || "Active",
+          settings: {
+            default_stitching_rate: Number(editingOrg.default_stitching_rate) || 45,
+            default_washing_rate: Number(editingOrg.default_washing_rate) || 5,
+            google_sheets_webhook_url: (editingOrg.google_sheets_webhook_url || "").trim(),
+          },
+          module_visibility: editingOrg.module_visibility,
+        }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showFeedback("success", `Organization "${editingOrg.name}" updated successfully!`)
+        setIsEditOrgModalOpen(false)
+        setEditingOrg(null)
+        loadData()
+      } else {
+        showFeedback("error", json.detail || "Failed to update organization")
+      }
+    } catch (e: any) {
+      showFeedback("error", e.message)
+    } finally {
+      setIsSavingOrg(false)
+    }
+  }
+
+  // Handle Delete Org
+  const handleDeleteOrg = async (org: any) => {
+    if (org.slug === "rd-jeans-main") {
+      alert("Cannot delete primary DenimFlow factory organization")
+      return
+    }
+    const confirmName = prompt(
+      `CAUTION: This will delete organization "${org.name}" and all its records!\n\nType "${org.slug}" to confirm deletion:`
+    )
+    if (confirmName !== org.slug) {
+      if (confirmName !== null) alert("Organization slug did not match. Deletion cancelled.")
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/organizations/${org.slug}`, { method: "DELETE" })
+      const json = await res.json()
+      if (json.success) {
+        showFeedback("success", json.message || "Organization deleted")
+        loadData()
+      } else {
+        showFeedback("error", json.detail || "Failed to delete organization")
+      }
+    } catch (e: any) {
+      showFeedback("error", e.message)
+    }
+  }
+
+  // 1-Click Toggle Organization Status (Active <-> Inactive)
+  const handleToggleOrgStatus = async (org: any) => {
+    if (org.slug === "rd-jeans-main" && org.status === "Active") {
+      alert("Notice: Primary DenimFlow factory organization cannot be deactivated as it is the master factory root.")
+      return
+    }
+
+    const nextStatus = org.status === "Inactive" ? "Active" : "Inactive"
+    const prevStatus = org.status || "Active"
+
+    // Instant optimistic UI update
+    setTogglingOrgSlug(org.slug)
+    setOrganizations((prev) =>
+      prev.map((o) => (o.slug === org.slug ? { ...o, status: nextStatus } : o))
+    )
+
+    try {
+      const res = await fetch(`/api/organizations/${org.slug}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showFeedback(
+          "success",
+          `Organization "${org.name}" is now ${nextStatus === "Active" ? "ACTIVATED (Online)" : "DEACTIVATED (Suspended)"}`
+        )
+      } else {
+        // Rollback on failure
+        setOrganizations((prev) =>
+          prev.map((o) => (o.slug === org.slug ? { ...o, status: prevStatus } : o))
+        )
+        showFeedback("error", json.detail || "Failed to update organization status")
+      }
+    } catch (e: any) {
+      // Rollback on failure
+      setOrganizations((prev) =>
+        prev.map((o) => (o.slug === org.slug ? { ...o, status: prevStatus } : o))
+      )
+      showFeedback("error", e.message)
+    } finally {
+      setTogglingOrgSlug(null)
+    }
+  }
+
+  // Health Ping to Tenant Database
+  const handlePingTenant = async (slug: string) => {
+    setTenantPing((prev) => ({
+      ...prev,
+      [slug]: { latency_ms: -1, status: "Testing...", loading: true },
+    }))
+
+    try {
+      const res = await fetch(`/api/organizations/${slug}/ping`)
+      const json = await res.json()
+      if (json.success) {
+        setTenantPing((prev) => ({
+          ...prev,
+          [slug]: { latency_ms: json.latency_ms, status: "Live Atlas", loading: false },
+        }))
+        showFeedback("success", `Pinged "${slug}" DB: ${json.latency_ms}ms latency (Connected)`)
+      } else {
+        setTenantPing((prev) => ({
+          ...prev,
+          [slug]: { latency_ms: -1, status: "Unreachable", loading: false },
+        }))
+        showFeedback("error", `Ping error: ${json.detail || "Tenant database unreachable"}`)
+      }
+    } catch (e: any) {
+      setTenantPing((prev) => ({
+        ...prev,
+        [slug]: { latency_ms: -1, status: "Failed", loading: false },
+      }))
+      showFeedback("error", e.message)
     }
   }
 
@@ -139,10 +445,17 @@ export default function SuperAdminPortalPage() {
     setMounted(true)
     const checkAuth = async () => {
       try {
+        const savedUser = localStorage.getItem("super_admin_user")
+        if (savedUser) setCurrentSuperAdminUser(savedUser)
+
         const res = await fetch("/api/super-admin/auth/me")
         if (!res.ok) {
           router.push("/super-admin/login")
           return
+        }
+        const authData = await res.json()
+        if (authData.user?.username) {
+          setCurrentSuperAdminUser(authData.user.username)
         }
         setIsAuthenticating(false)
         loadData()
@@ -387,6 +700,54 @@ export default function SuperAdminPortalPage() {
     }
   }
 
+  // 1-Click Toggle Staff User Account Status (Active <-> Inactive)
+  const handleToggleUserStatus = async (user: any) => {
+    if (user.role === "SuperAdmin") {
+      alert("Security Guard: Master Super Admin account cannot be deactivated.")
+      return
+    }
+
+    const nextStatus = user.status === "Inactive" ? "Active" : "Inactive"
+    const prevStatus = user.status || "Active"
+    const userId = user.id || user._id
+
+    // Instant optimistic UI update
+    setTogglingUserId(userId)
+    setUsers((prev) =>
+      prev.map((u) => ((u.id || u._id) === userId ? { ...u, status: nextStatus } : u))
+    )
+
+    try {
+      const res = await fetch(`/api/super-admin/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showFeedback(
+          "success",
+          `Staff account @${user.username} is now ${nextStatus === "Active" ? "ACTIVATED" : "DEACTIVATED (Login Disabled)"
+          }`
+        )
+      } else {
+        // Rollback on failure
+        setUsers((prev) =>
+          prev.map((u) => ((u.id || u._id) === userId ? { ...u, status: prevStatus } : u))
+        )
+        showFeedback("error", json.detail || "Failed to update staff status")
+      }
+    } catch {
+      // Rollback on failure
+      setUsers((prev) =>
+        prev.map((u) => ((u.id || u._id) === userId ? { ...u, status: prevStatus } : u))
+      )
+      showFeedback("error", "Failed to update staff status")
+    } finally {
+      setTogglingUserId(null)
+    }
+  }
+
   // Update Master Super Admin Password
   const handleUpdateSuperAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -398,7 +759,7 @@ export default function SuperAdminPortalPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: "AkshayGohel21",
+          username: currentSuperAdminUser,
           password: superAdminNewPass.trim(),
           role: "SuperAdmin",
           status: "Active"
@@ -406,7 +767,7 @@ export default function SuperAdminPortalPage() {
       })
       const json = await res.json()
       if (json.success) {
-        showFeedback("success", "Super Admin master password updated successfully!")
+        showFeedback("success", `Super Admin master password for @${currentSuperAdminUser} updated successfully!`)
         setSuperAdminNewPass("")
       } else {
         showFeedback("error", json.detail || "Failed to update master password")
@@ -593,10 +954,52 @@ export default function SuperAdminPortalPage() {
     (m) => (settings.module_visibility?.[m.key] ?? true) === true
   ).length
 
+  // Filtered Organizations (Instant client-side performance)
+  const filteredOrganizations = organizations.filter((org) => {
+    const q = orgSearchQuery.trim().toLowerCase()
+    const matchesSearch =
+      !q ||
+      org.name?.toLowerCase().includes(q) ||
+      org.slug?.toLowerCase().includes(q) ||
+      org.owner_name?.toLowerCase().includes(q) ||
+      org.phone?.toLowerCase().includes(q) ||
+      org.database_name?.toLowerCase().includes(q)
+
+    const matchesStatus =
+      orgStatusFilter === "all" ||
+      (orgStatusFilter === "active" && (org.status || "Active") === "Active") ||
+      (orgStatusFilter === "inactive" && org.status === "Inactive")
+
+    return matchesSearch && matchesStatus
+  })
+
+  const activeOrgsCount = organizations.filter((o) => (o.status || "Active") === "Active").length
+  const inactiveOrgsCount = organizations.filter((o) => o.status === "Inactive").length
+
+  // Filtered Staff Users
+  const filteredUsers = users.filter((u) => {
+    const q = userSearchQuery.trim().toLowerCase()
+    const matchesSearch =
+      !q ||
+      u.username?.toLowerCase().includes(q) ||
+      u.display_name?.toLowerCase().includes(q) ||
+      u.role?.toLowerCase().includes(q)
+
+    const matchesStatus =
+      userStatusFilter === "all" ||
+      (userStatusFilter === "active" && (u.status || "Active") === "Active") ||
+      (userStatusFilter === "inactive" && u.status === "Inactive")
+
+    return matchesSearch && matchesStatus
+  })
+
+  const activeUsersCount = users.filter((u) => (u.status || "Active") === "Active").length
+  const inactiveUsersCount = users.filter((u) => u.status === "Inactive").length
+
   return (
     <main className="min-h-screen bg-background text-foreground pb-24">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
-        
+
         {/* ========================================================================= */}
         {/* EXECUTIVE SUPER ADMIN HEADER                                              */}
         {/* ========================================================================= */}
@@ -611,17 +1014,17 @@ export default function SuperAdminPortalPage() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-black tracking-tight text-foreground md:text-2xl">
-                  Super Admin Control Portal
+                  DenimFlow Control Center
                 </h1>
                 <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-black text-primary ring-1 ring-primary/20">
-                  AkshayGohel21
+                  {currentSuperAdminUser}
                 </span>
                 <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
                   Master Authority
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground font-medium">
-                Dynamic Module Switches, Dropdown Master, Factory Rates &amp; Database Backups
+                Super Admin Multi-Organization Cloud, Dropdown Master &amp; Database Backups
               </p>
             </div>
           </div>
@@ -659,11 +1062,10 @@ export default function SuperAdminPortalPage() {
         {/* Global Feedback Banner */}
         {feedback && (
           <div
-            className={`flex items-center gap-2.5 rounded-2xl p-4 text-xs font-bold ring-1 animate-in fade-in duration-200 ${
-              feedback.type === "success"
+            className={`flex items-center gap-2.5 rounded-2xl p-4 text-xs font-bold ring-1 animate-in fade-in duration-200 ${feedback.type === "success"
                 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30"
                 : "bg-red-500/10 text-red-700 dark:text-red-300 ring-red-500/30"
-            }`}
+              }`}
           >
             {feedback.type === "success" ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -733,14 +1135,24 @@ export default function SuperAdminPortalPage() {
         {/* ========================================================================= */}
         {/* SEGMENTED PORTAL NAVIGATION TABS                                         */}
         {/* ========================================================================= */}
-        <div className="flex overflow-x-auto gap-1 rounded-2xl bg-muted/80 p-1.5 ring-1 ring-border/70">
+        <div className="flex overflow-x-auto gap-1 rounded-2xl bg-muted/80 p-1.5 ring-1 ring-border/70 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
-            onClick={() => setActiveTab("visibility")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "visibility"
+            onClick={() => setActiveTab("organizations")}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "organizations"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
+          >
+            <Building2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <span>🏢 Organizations Control ({organizations.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("visibility")}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "visibility"
+                ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
+                : "text-muted-foreground hover:text-foreground"
+              }`}
           >
             <Sliders className="h-4 w-4 text-primary" />
             <span>Dynamic Modules (Show / Hide)</span>
@@ -748,11 +1160,10 @@ export default function SuperAdminPortalPage() {
 
           <button
             onClick={() => setActiveTab("dropdowns")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "dropdowns"
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "dropdowns"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Tags className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             <span>Dropdown Master</span>
@@ -760,11 +1171,10 @@ export default function SuperAdminPortalPage() {
 
           <button
             onClick={() => setActiveTab("profile")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "profile"
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "profile"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Building2 className="h-4 w-4 text-blue-600" />
             <span>Factory Profile &amp; Rates</span>
@@ -772,11 +1182,10 @@ export default function SuperAdminPortalPage() {
 
           <button
             onClick={() => setActiveTab("users")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "users"
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "users"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Users className="h-4 w-4 text-amber-600" />
             <span>Staff Accounts</span>
@@ -784,11 +1193,10 @@ export default function SuperAdminPortalPage() {
 
           <button
             onClick={() => setActiveTab("backup")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "backup"
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "backup"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Database className="h-4 w-4 text-emerald-600" />
             <span>Backup &amp; Restore</span>
@@ -796,11 +1204,10 @@ export default function SuperAdminPortalPage() {
 
           <button
             onClick={() => setActiveTab("stats")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${
-              activeTab === "stats"
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold whitespace-nowrap transition-all ${activeTab === "stats"
                 ? "bg-card text-foreground shadow-sm ring-1 ring-border/60"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Layers className="h-4 w-4 text-purple-600" />
             <span>Live DB Health</span>
@@ -808,11 +1215,374 @@ export default function SuperAdminPortalPage() {
         </div>
 
         {/* ========================================================================= */}
+        {/* TAB 0: MULTI-ORGANIZATION CONTROL PLANE                                  */}
+        {/* ========================================================================= */}
+        {activeTab === "organizations" && (
+          <div className="flex flex-col gap-6">
+            {/* Header Banner */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-700 to-slate-900 p-6 text-white shadow-xl">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-wider">
+                    <Building2 className="h-3 w-3" />
+                    <span>Multi-Tenant Architecture</span>
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-2">
+                    Organizations &amp; Client Factories
+                  </h3>
+                  <p className="text-xs text-white/80 mt-1 max-w-xl">
+                    Each organization has an isolated physical database on MongoDB Atlas with independent fabric inventory, cutting entries, hisabs, and staff settings.
+                  </p>
+                  <div className="flex items-center gap-3 mt-3 text-xs font-bold text-white/90">
+                    <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-xl">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Active: {activeOrgsCount}
+                    </span>
+                    <span className="flex items-center gap-1.5 bg-black/20 px-2.5 py-1 rounded-xl">
+                      <span className="h-2 w-2 rounded-full bg-rose-400" />
+                      Deactivated: {inactiveOrgsCount}
+                    </span>
+                    <span className="bg-black/20 px-2.5 py-1 rounded-xl">
+                      Total: {organizations.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => loadData()}
+                    className="flex items-center gap-1.5 rounded-2xl bg-white/10 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-white/20 active:scale-95 transition-all"
+                    title="Reload live database metrics"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Refresh</span>
+                  </button>
+                  <button
+                    onClick={() => setIsCreateOrgModalOpen(true)}
+                    className="flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-xs font-black text-emerald-950 shadow-md hover:bg-white/95 active:scale-95 transition-all shrink-0"
+                  >
+                    <Plus className="h-4 w-4 text-emerald-700" />
+                    <span>+ Create New Organization</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Search & Status Filter Toolbar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-2xl bg-card p-3 shadow-xs ring-1 ring-border/70">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={orgSearchQuery}
+                  onChange={(e) => setOrgSearchQuery(e.target.value)}
+                  placeholder="Search organizations by name, slug, owner, phone, database..."
+                  className="w-full rounded-xl bg-secondary/60 pl-10 pr-9 py-2 text-xs text-foreground placeholder:text-muted-foreground ring-1 ring-border/50 focus:ring-2 focus:ring-primary focus:outline-hidden"
+                />
+                {orgSearchQuery && (
+                  <button
+                    onClick={() => setOrgSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setOrgStatusFilter("all")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${orgStatusFilter === "all"
+                      ? "bg-card text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  All ({organizations.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrgStatusFilter("active")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${orgStatusFilter === "active"
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  Active ({activeOrgsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrgStatusFilter("inactive")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${orgStatusFilter === "inactive"
+                      ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  Deactivated ({inactiveOrgsCount})
+                </button>
+              </div>
+            </div>
+
+            {/* Empty State */}
+            {filteredOrganizations.length === 0 && (
+              <div className="flex flex-col items-center justify-center p-12 text-center rounded-3xl bg-card ring-1 ring-border/70">
+                <Building2 className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <h4 className="text-sm font-bold text-foreground">No organizations match your filter</h4>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                  {orgSearchQuery
+                    ? `No organizations found matching "${orgSearchQuery}". Try clearing your search.`
+                    : "No organizations found for the selected status filter."}
+                </p>
+                {(orgSearchQuery || orgStatusFilter !== "all") && (
+                  <button
+                    onClick={() => {
+                      setOrgSearchQuery("")
+                      setOrgStatusFilter("all")
+                    }}
+                    className="mt-4 rounded-xl bg-secondary px-4 py-2 text-xs font-bold text-secondary-foreground hover:bg-muted"
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Organizations Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredOrganizations.map((org: any) => {
+                const isActiveWorkspace = org.slug === activeOrgSlug
+                const isOrgActive = (org.status || "Active") === "Active"
+                const isRoot = org.slug === "rd-jeans-main"
+                const ping = tenantPing[org.slug]
+                const isToggling = togglingOrgSlug === org.slug
+
+                return (
+                  <div
+                    key={org.slug}
+                    className={`rounded-3xl bg-card p-5 ring-1 shadow-sm flex flex-col justify-between gap-4 transition-all ${!isOrgActive
+                        ? "ring-rose-500/30 bg-rose-500/[0.02]"
+                        : isActiveWorkspace
+                          ? "ring-2 ring-primary"
+                          : "ring-border/70 hover:ring-border"
+                      }`}
+                  >
+                    <div>
+                      {/* Card Header & Activation Toggle */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex h-12 w-12 items-center justify-center rounded-2xl font-black text-base ${!isOrgActive
+                                ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                : isActiveWorkspace
+                                  ? "bg-primary text-primary-foreground shadow-xs"
+                                  : "bg-muted text-foreground"
+                              }`}
+                          >
+                            {org.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-extrabold text-base text-foreground">{org.name}</h4>
+                              {isActiveWorkspace && (
+                                <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-black text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20">
+                                  Current Workspace
+                                </span>
+                              )}
+                              {isRoot && (
+                                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary ring-1 ring-primary/20">
+                                  ROOT
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                              Owner: {org.owner_name || "Akshay Gohel"} • {org.phone || "No phone"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Status Switcher Component */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide ${isOrgActive
+                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/30"
+                                  : "bg-rose-500/15 text-rose-700 dark:text-rose-400 ring-1 ring-rose-500/30"
+                                }`}
+                            >
+                              {isOrgActive ? "ACTIVE" : "DEACTIVATED"}
+                            </span>
+
+                            {/* 1-Click Status Toggle */}
+                            {!isRoot ? (
+                              <button
+                                type="button"
+                                disabled={isToggling}
+                                onClick={() => handleToggleOrgStatus(org)}
+                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden disabled:opacity-50 ${isOrgActive ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                                  }`}
+                                title={
+                                  isOrgActive
+                                    ? "Click to Deactivate this Organization (Suspends workspace access)"
+                                    : "Click to Activate this Organization"
+                                }
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out mt-0.5 ${isOrgActive ? "translate-x-4.5" : "translate-x-0.5"
+                                    }`}
+                                />
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground font-semibold" title="Root factory is always active">
+                                🔒 Locked
+                              </span>
+                            )}
+                          </div>
+                          {isToggling && (
+                            <span className="text-[9px] text-muted-foreground animate-pulse">Updating...</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Deactivation Banner Notice */}
+                      {!isOrgActive && (
+                        <div className="mt-3 flex items-center gap-2 rounded-xl bg-rose-500/10 p-2.5 text-xs text-rose-700 dark:text-rose-300 ring-1 ring-rose-500/20">
+                          <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                          <span>
+                            <strong>Organization Suspended:</strong> Factory staff and operators cannot log into or select this workspace until reactivated.
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Database Info & Live Ping */}
+                      <div className="mt-3 flex items-center justify-between rounded-xl bg-muted/40 px-3 py-2 text-[11px] font-mono text-muted-foreground ring-1 ring-border/50">
+                        <span className="truncate mr-2 flex items-center gap-1.5 flex-wrap">
+                          <span>DB: <strong className="text-foreground">{org.database_name}</strong></span>
+                          {org.settings?.google_sheets_webhook_url ? (
+                            <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.2 text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+                              Sheet Linked
+                            </span>
+                          ) : null}
+                        </span>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {ping ? (
+                            <span
+                              className={`flex items-center gap-1 text-[10px] font-bold ${ping.latency_ms >= 0
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-rose-600 dark:text-rose-400"
+                                }`}
+                            >
+                              {ping.latency_ms >= 0 ? (
+                                <>
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span>{ping.latency_ms}ms Live</span>
+                                </>
+                              ) : (
+                                <span>Offline</span>
+                              )}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handlePingTenant(org.slug)}
+                              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+                              title="Test live database roundtrip latency"
+                            >
+                              <Activity className="h-3 w-3" />
+                              <span>Ping DB</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Live Stats Row */}
+                      <div className="mt-3 grid grid-cols-4 gap-1.5 rounded-2xl bg-muted/30 p-2.5 text-center text-xs">
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Workers</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{org.stats?.totalEmployees || 0}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Lots</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{org.stats?.totalLots || 0}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Hisabs</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{org.stats?.totalHisabs || 0}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Rolls</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{org.stats?.totalRolls || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions Toolbar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isActiveWorkspace ? (
+                          <span className="text-xs font-extrabold text-emerald-600 flex items-center gap-1">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Active Workspace</span>
+                          </span>
+                        ) : isOrgActive ? (
+                          <button
+                            onClick={() => handleSwitchOrgFromAdmin(org.slug)}
+                            className="rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 active:scale-95 transition-all"
+                          >
+                            Switch to this Org
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleToggleOrgStatus(org)}
+                            className="rounded-xl bg-emerald-600/10 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-600/30 hover:bg-emerald-600/20 active:scale-95 transition-all"
+                          >
+                            Activate to Switch
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => handleOpenEditOrg(org)}
+                          className="rounded-xl bg-card px-3 py-1.5 text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 transition-all"
+                        >
+                          Customize &amp; Modules
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <a
+                          href={`/api/organizations/${org.slug}/backup`}
+                          download
+                          className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          title="Download tenant database JSON archive"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Backup</span>
+                        </a>
+
+                        {!isRoot && (
+                          <button
+                            onClick={() => handleDeleteOrg(org)}
+                            className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                            title="Delete Organization and drop database"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
         {/* TAB 1: DYNAMIC MODULES (SHOW / HIDE CONTROLS)                             */}
         {/* ========================================================================= */}
         {activeTab === "visibility" && (
           <div className="flex flex-col gap-6">
-            
+
             {/* 12 Quick Access Modules Section */}
             <div className="flex flex-col gap-4 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-border/70">
               <div className="flex flex-col gap-1 border-b border-border/60 pb-4">
@@ -838,11 +1608,10 @@ export default function SuperAdminPortalPage() {
                   return (
                     <div
                       key={mod.key}
-                      className={`flex flex-col justify-between gap-3 rounded-2xl p-4 transition-all duration-200 ring-1 ${
-                        isShowing
+                      className={`flex flex-col justify-between gap-3 rounded-2xl p-4 transition-all duration-200 ring-1 ${isShowing
                           ? "bg-card shadow-xs ring-border/80"
                           : "bg-muted/40 opacity-60 ring-border/40"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
@@ -853,11 +1622,10 @@ export default function SuperAdminPortalPage() {
                             <div className="flex items-center gap-2">
                               <h3 className="text-xs font-extrabold text-foreground">{mod.name}</h3>
                               <span
-                                className={`rounded-full px-2 py-0.5 text-[9px] font-black tracking-wide ${
-                                  isShowing
+                                className={`rounded-full px-2 py-0.5 text-[9px] font-black tracking-wide ${isShowing
                                     ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                                     : "bg-muted text-muted-foreground"
-                                }`}
+                                  }`}
                               >
                                 {isShowing ? "SHOWING" : "HIDDEN"}
                               </span>
@@ -873,20 +1641,18 @@ export default function SuperAdminPortalPage() {
                         <span className="text-[10px] font-mono text-muted-foreground">
                           route: /{mod.key.replace("_", "-")}
                         </span>
-                        
+
                         {/* iOS-Style Toggle Switch */}
                         <button
                           type="button"
                           onClick={() => handleToggleModuleVisibility(mod.key)}
-                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                            isShowing ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
-                          }`}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden ${isShowing ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                            }`}
                           aria-label={`Toggle ${mod.name}`}
                         >
                           <span
-                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
-                              isShowing ? "translate-x-5" : "translate-x-0.5"
-                            } mt-0.5`}
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${isShowing ? "translate-x-5" : "translate-x-0.5"
+                              } mt-0.5`}
                           />
                         </button>
                       </div>
@@ -941,18 +1707,16 @@ export default function SuperAdminPortalPage() {
                         <p className="text-xs font-bold text-foreground">{op.label}</p>
                         <p className="text-[11px] text-muted-foreground mt-0.5">{op.desc}</p>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={() => handleToggleOperation(op.key)}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                          enabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
-                        }`}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden ${enabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                          }`}
                       >
                         <span
-                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
-                            enabled ? "translate-x-5" : "translate-x-0.5"
-                          } mt-0.5`}
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${enabled ? "translate-x-5" : "translate-x-0.5"
+                            } mt-0.5`}
                         />
                       </button>
                     </div>
@@ -1004,18 +1768,16 @@ export default function SuperAdminPortalPage() {
                       setEditingItemNew("")
                       setNewDropdownItem("")
                     }}
-                    className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ring-1 ${
-                      isSelected
+                    className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ring-1 ${isSelected
                         ? "bg-primary text-primary-foreground ring-primary shadow-sm"
                         : "bg-card text-foreground ring-border/80 hover:bg-muted"
-                    }`}
+                      }`}
                   >
                     <Icon className="h-3.5 w-3.5" />
                     <span>{cat.label || catKey}</span>
                     <span
-                      className={`rounded-full px-2 py-0.2 text-[10px] font-mono font-bold ${
-                        isSelected ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-                      }`}
+                      className={`rounded-full px-2 py-0.2 text-[10px] font-mono font-bold ${isSelected ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                        }`}
                     >
                       {(cat.items || []).length}
                     </span>
@@ -1185,7 +1947,7 @@ export default function SuperAdminPortalPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              
+
               {/* Factory Info Card */}
               <div className="flex flex-col gap-4 rounded-2xl bg-secondary/30 p-5 ring-1 ring-border/60">
                 <h3 className="text-xs font-black uppercase tracking-wider text-primary">
@@ -1317,13 +2079,13 @@ export default function SuperAdminPortalPage() {
         {/* ========================================================================= */}
         {activeTab === "users" && (
           <div className="flex flex-col gap-6">
-            
+
             {/* Master Super Admin Password Change */}
             <div className="flex flex-col gap-4 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-border/70">
               <div className="border-b border-border/60 pb-3">
                 <h2 className="text-base font-black text-foreground flex items-center gap-2">
                   <KeyRound className="h-5 w-5 text-indigo-600" />
-                  <span>Update Super Admin Master Password (AkshayGohel21)</span>
+                  <span>Update Super Admin Master Password ({currentSuperAdminUser})</span>
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Update your confidential password. It will be encrypted with bcrypt in MongoDB.
@@ -1352,14 +2114,24 @@ export default function SuperAdminPortalPage() {
 
             {/* Staff Accounts Management */}
             <div className="flex flex-col gap-4 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-border/70">
-              <div className="flex flex-col gap-2 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-black text-foreground flex items-center gap-2">
-                    <Users className="h-4 w-4 text-amber-600" />
-                    <span>Staff Team Accounts &amp; Access Controls</span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-foreground flex items-center gap-2">
+                      <Users className="h-4 w-4 text-amber-600" />
+                      <span>Staff Team Accounts &amp; Access Controls</span>
+                    </h3>
+                    <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-black text-emerald-700 dark:text-emerald-400">
+                      {activeUsersCount} Active
+                    </span>
+                    {inactiveUsersCount > 0 && (
+                      <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-black text-rose-700 dark:text-rose-400">
+                        {inactiveUsersCount} Deactivated
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Create and manage staff accounts for cutting masters, managers, cashiers, and floor operators.
+                    Create and manage staff accounts for cutting masters, managers, cashiers, and floor operators. 1-click toggle to suspend access.
                   </p>
                 </div>
 
@@ -1375,55 +2147,174 @@ export default function SuperAdminPortalPage() {
                     })
                     setIsUserModalOpen(true)
                   }}
-                  className="flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 active:scale-95"
+                  className="flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 active:scale-95 shrink-0"
                 >
                   <Plus className="h-4 w-4" />
                   <span>Create Staff Account</span>
                 </button>
               </div>
 
+              {/* Staff Search & Filter Toolbar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="Search staff by username, name, or role..."
+                    className="w-full rounded-xl bg-secondary/60 pl-10 pr-9 py-2 text-xs text-foreground placeholder:text-muted-foreground ring-1 ring-border/50 focus:ring-2 focus:ring-primary focus:outline-hidden"
+                  />
+                  {userSearchQuery && (
+                    <button
+                      onClick={() => setUserSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setUserStatusFilter("all")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${userStatusFilter === "all"
+                        ? "bg-card text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    All ({users.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserStatusFilter("active")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${userStatusFilter === "active"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    Active ({activeUsersCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserStatusFilter("inactive")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${userStatusFilter === "inactive"
+                        ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    Deactivated ({inactiveUsersCount})
+                  </button>
+                </div>
+              </div>
+
+              {/* Empty Search State */}
+              {filteredUsers.length === 0 && (
+                <div className="flex flex-col items-center justify-center p-8 text-center rounded-2xl bg-secondary/20 ring-1 ring-border/50">
+                  <Users className="h-8 w-8 text-muted-foreground/40 mb-2" />
+                  <p className="text-xs font-bold text-foreground">No staff accounts match your search</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Try searching for a different username or reset filters.</p>
+                  <button
+                    onClick={() => {
+                      setUserSearchQuery("")
+                      setUserStatusFilter("all")
+                    }}
+                    className="mt-3 rounded-lg bg-secondary px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              )}
+
               {/* Staff List Grid */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
-                {users.map((u: any) => {
-                  const isSuper = u.role === "SuperAdmin" || u.username === "AkshayGohel21"
+                {filteredUsers.map((u: any) => {
+                  const isSuper = u.role === "SuperAdmin"
+                  const isUserActive = (u.status || "Active") === "Active"
+                  const userId = u.id || u._id
+                  const isToggling = togglingUserId === userId
 
                   return (
                     <div
-                      key={u.id || u._id || u.username}
-                      className="flex flex-col justify-between gap-3 rounded-2xl bg-secondary/30 p-4 ring-1 ring-border/60 shadow-xs"
+                      key={userId || u.username}
+                      className={`flex flex-col justify-between gap-3 rounded-2xl p-4 ring-1 shadow-xs transition-all ${!isUserActive
+                          ? "bg-rose-500/[0.03] ring-rose-500/30"
+                          : "bg-secondary/30 ring-border/60 hover:ring-border"
+                        }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-xs font-black text-primary">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-black ${!isUserActive
+                                ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                : "bg-primary/10 text-primary"
+                              }`}
+                          >
                             {(u.display_name || u.username || "U").substring(0, 2).toUpperCase()}
                           </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <h4 className="text-xs font-bold text-foreground">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-xs font-bold text-foreground truncate">
                                 {u.display_name || u.username}
                               </h4>
                               {isSuper && (
-                                <span className="rounded-full bg-primary/20 px-1.5 py-0.2 text-[9px] font-black text-primary">
+                                <span className="rounded-full bg-primary/20 px-1.5 py-0.2 text-[9px] font-black text-primary shrink-0">
                                   MASTER
                                 </span>
                               )}
                             </div>
-                            <p className="text-[10px] text-muted-foreground font-mono">
+                            <p className="text-[10px] text-muted-foreground font-mono truncate">
                               @{u.username}
                             </p>
                           </div>
                         </div>
 
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[9px] font-black ${
-                            u.status === "Inactive"
-                              ? "bg-muted text-muted-foreground"
-                              : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                          }`}
-                        >
-                          {u.status || "Active"}
-                        </span>
+                        {/* Status Switcher & Badge */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[9px] font-black ${isUserActive
+                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                  : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                                }`}
+                            >
+                              {isUserActive ? "Active" : "Deactivated"}
+                            </span>
+
+                            {/* 1-Click User Activation Switch */}
+                            {!isSuper && (
+                              <button
+                                type="button"
+                                disabled={isToggling}
+                                onClick={() => handleToggleUserStatus(u)}
+                                className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-hidden disabled:opacity-50 ${isUserActive ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                                  }`}
+                                title={
+                                  isUserActive
+                                    ? "Click to Deactivate account (User will be immediately blocked from logging in)"
+                                    : "Click to Activate account"
+                                }
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out mt-0.5 ${isUserActive ? "translate-x-4" : "translate-x-0.5"
+                                    }`}
+                                />
+                              </button>
+                            )}
+                          </div>
+                          {isToggling && (
+                            <span className="text-[8px] text-muted-foreground animate-pulse">Saving...</span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Warning notice if deactivated */}
+                      {!isUserActive && (
+                        <div className="rounded-lg bg-rose-500/10 px-2.5 py-1 text-[10px] font-semibold text-rose-700 dark:text-rose-300">
+                          🔒 Login Access Blocked
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-between border-t border-border/60 pt-2.5">
                         <span className="rounded-md bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
@@ -1446,15 +2337,15 @@ export default function SuperAdminPortalPage() {
                                 setIsUserModalOpen(true)
                               }}
                               className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              title="Edit user"
+                              title="Edit user details or reset password"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
 
                             <button
-                              onClick={() => handleDeleteUser(u.id || u._id, u.username)}
+                              onClick={() => handleDeleteUser(userId, u.username)}
                               className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"
-                              title="Delete user"
+                              title="Delete user account"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1475,7 +2366,7 @@ export default function SuperAdminPortalPage() {
         {/* ========================================================================= */}
         {activeTab === "backup" && (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            
+
             {/* Export Backup Card */}
             <div className="flex flex-col gap-4 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-border/70">
               <div className="flex items-center gap-3 border-b border-border/60 pb-3">
@@ -1777,6 +2668,420 @@ export default function SuperAdminPortalPage() {
                   className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 shadow-sm"
                 >
                   Save Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CREATE NEW ORGANIZATION                                           */}
+      {/* ========================================================================= */}
+      {isCreateOrgModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg rounded-3xl bg-card p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Building2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-foreground">Create New Organization</h3>
+                  <p className="text-xs text-muted-foreground">Creates a dedicated, isolated database on Atlas</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCreateOrgModalOpen(false)}
+                className="rounded-full p-1.5 text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateOrganization} className="flex flex-col gap-4 text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-muted-foreground">Organization / Factory Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Shiv Denim Unit 2"
+                  value={newOrgForm.name}
+                  onChange={(e) => setNewOrgForm({ ...newOrgForm, name: e.target.value })}
+                  className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">URL Slug (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. shiv-denim"
+                    value={newOrgForm.slug}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                    className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border font-mono"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">Owner / Manager Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Ramesh Patel"
+                    value={newOrgForm.owner_name}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, owner_name: e.target.value })}
+                    className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">Phone / WhatsApp</label>
+                  <input
+                    type="text"
+                    placeholder="+91 98765 43210"
+                    value={newOrgForm.phone}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, phone: e.target.value })}
+                    className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">GSTIN (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="24AAAAA0000A1Z5"
+                    value={newOrgForm.gstin}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, gstin: e.target.value.toUpperCase() })}
+                    className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-muted-foreground">Factory Location / Address</label>
+                <textarea
+                  rows={2}
+                  placeholder="GIDC Katargam, Surat, Gujarat"
+                  value={newOrgForm.address}
+                  onChange={(e) => setNewOrgForm({ ...newOrgForm, address: e.target.value })}
+                  className="rounded-xl bg-background px-3.5 py-2 text-xs text-foreground ring-1 ring-border resize-none"
+                />
+              </div>
+
+              {/* Optional Initial Factory Manager Login */}
+              <div className="flex flex-col gap-2 rounded-2xl bg-secondary/40 p-3 ring-1 ring-border/50">
+                <div>
+                  <h4 className="font-bold text-foreground text-xs">Initial Factory Manager Login (Optional)</h4>
+                  <p className="text-[10px] text-muted-foreground">Provision the client factory manager login account immediately</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-muted-foreground">Manager Username</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. shiv_manager"
+                      value={newOrgForm.initial_username}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, initial_username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
+                      className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-muted-foreground">Initial Password</label>
+                    <input
+                      type="password"
+                      placeholder="e.g. Shiv@123"
+                      value={newOrgForm.initial_password}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, initial_password: e.target.value })}
+                      className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-3 ring-1 ring-border/50">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-foreground">Default Stitching Rate (₹/pc)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newOrgForm.default_stitching_rate}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, default_stitching_rate: Number(e.target.value) })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-foreground">Default Washing Rate (₹/pc)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newOrgForm.default_washing_rate}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, default_washing_rate: Number(e.target.value) })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border"
+                  />
+                </div>
+              </div>
+
+              {/* Module Toggles for this Org */}
+              <div className="flex flex-col gap-2">
+                <label className="font-black text-foreground uppercase tracking-wider text-[10px]">
+                  Enabled Modules for this Organization (12 Modules)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {Object.entries(newOrgForm.modules).map(([modKey, isEnabled]) => (
+                    <label
+                      key={modKey}
+                      className={`flex items-center gap-2 p-2 rounded-xl border text-[11px] font-bold cursor-pointer transition-all ${isEnabled
+                          ? "bg-primary/10 border-primary/40 text-foreground"
+                          : "bg-muted/30 border-border text-muted-foreground"
+                        }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        onChange={(e) =>
+                          setNewOrgForm({
+                            ...newOrgForm,
+                            modules: {
+                              ...newOrgForm.modules,
+                              [modKey]: e.target.checked,
+                            },
+                          })
+                        }
+                        className="rounded text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <span className="capitalize">{modKey.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-border pt-3 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateOrgModalOpen(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOrg || !newOrgForm.name.trim()}
+                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-95 active:scale-95 disabled:opacity-50"
+                >
+                  {isSavingOrg ? "Initializing Database..." : "Create & Launch Organization"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CUSTOMIZE ORGANIZATION & MODULE VISIBILITY                         */}
+      {/* ========================================================================= */}
+      {isEditOrgModalOpen && editingOrg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg rounded-3xl bg-card p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-foreground">
+                  Customize: {editingOrg.name}
+                </h3>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Database: {editingOrg.database_name}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsEditOrgModalOpen(false)}
+                className="rounded-full p-1.5 text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditOrg} className="flex flex-col gap-4 text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-muted-foreground">Organization Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingOrg.name || ""}
+                  onChange={(e) => setEditingOrg({ ...editingOrg, name: e.target.value })}
+                  className="rounded-xl bg-background px-3.5 py-2.5 text-xs text-foreground ring-1 ring-border"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">Owner Name</label>
+                  <input
+                    type="text"
+                    value={editingOrg.owner_name || ""}
+                    onChange={(e) => setEditingOrg({ ...editingOrg, owner_name: e.target.value })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-muted-foreground">Phone</label>
+                  <input
+                    type="text"
+                    value={editingOrg.phone || ""}
+                    onChange={(e) => setEditingOrg({ ...editingOrg, phone: e.target.value })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-muted-foreground">Address</label>
+                <textarea
+                  rows={2}
+                  value={editingOrg.address || ""}
+                  onChange={(e) => setEditingOrg({ ...editingOrg, address: e.target.value })}
+                  className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border resize-none"
+                />
+              </div>
+
+              {/* Organization Status Toggle */}
+              <div className="flex flex-col gap-1 rounded-2xl bg-muted/40 p-3 ring-1 ring-border/50">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-foreground">Operational Status</label>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[9px] font-black ${editingOrg.status === "Inactive"
+                        ? "bg-rose-500/15 text-rose-700 dark:text-rose-400 ring-1 ring-rose-500/30"
+                        : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/30"
+                      }`}
+                  >
+                    {editingOrg.status || "Active"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditingOrg({ ...editingOrg, status: "Active" })}
+                    className={`p-2 rounded-xl text-xs font-bold transition-all ring-1 ${editingOrg.status !== "Inactive"
+                        ? "bg-emerald-600 text-white ring-emerald-600 shadow-xs"
+                        : "bg-background text-muted-foreground ring-border hover:text-foreground"
+                      }`}
+                  >
+                    ✓ Active (Enabled)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={editingOrg.slug === "rd-jeans-main"}
+                    onClick={() => {
+                      if (editingOrg.slug === "rd-jeans-main") {
+                        alert("Primary factory root cannot be deactivated.")
+                        return
+                      }
+                      setEditingOrg({ ...editingOrg, status: "Inactive" })
+                    }}
+                    className={`p-2 rounded-xl text-xs font-bold transition-all ring-1 disabled:opacity-40 ${editingOrg.status === "Inactive"
+                        ? "bg-rose-600 text-white ring-rose-600 shadow-xs"
+                        : "bg-background text-muted-foreground ring-border hover:text-foreground"
+                      }`}
+                  >
+                    ✕ Deactivated (Suspended)
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  When deactivated, users cannot switch into or modify this organization workspace.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 rounded-2xl bg-muted/40 p-3 ring-1 ring-border/50">
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-foreground">Stitching Rate (₹/pc)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editingOrg.default_stitching_rate ?? 45}
+                    onChange={(e) => setEditingOrg({ ...editingOrg, default_stitching_rate: Number(e.target.value) })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-foreground">Washing Rate (₹/pc)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editingOrg.default_washing_rate ?? 5}
+                    onChange={(e) => setEditingOrg({ ...editingOrg, default_washing_rate: Number(e.target.value) })}
+                    className="rounded-xl bg-background px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border"
+                  />
+                </div>
+              </div>
+
+              {/* Dedicated Google Sheets Webhook URL for this Tenant */}
+              <div className="flex flex-col gap-1 rounded-2xl bg-secondary/40 p-3 ring-1 ring-border/50">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-foreground flex items-center gap-1.5">
+                    <Cloud className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Dedicated Google Sheets Webhook URL</span>
+                  </label>
+                  <span className="text-[10px] text-muted-foreground">Optional</span>
+                </div>
+                <input
+                  type="url"
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  value={editingOrg.google_sheets_webhook_url || ""}
+                  onChange={(e) => setEditingOrg({ ...editingOrg, google_sheets_webhook_url: e.target.value })}
+                  className="rounded-xl bg-background px-3 py-2 text-xs text-foreground ring-1 ring-border font-mono mt-1"
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Links this organization to its own independent Google Spreadsheet. Data will only sync to this URL.
+                </p>
+              </div>
+
+              {/* Module Visibility for this Org */}
+              <div className="flex flex-col gap-2">
+                <label className="font-black text-foreground uppercase tracking-wider text-[10px]">
+                  Module Visibility for this Organization
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {Object.entries(editingOrg.module_visibility || {}).map(([modKey, isEnabled]) => (
+                    <label
+                      key={modKey}
+                      className={`flex items-center gap-2 p-2 rounded-xl border text-[11px] font-bold cursor-pointer transition-all ${isEnabled
+                          ? "bg-primary/10 border-primary/40 text-foreground"
+                          : "bg-muted/30 border-border text-muted-foreground"
+                        }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(isEnabled)}
+                        onChange={(e) =>
+                          setEditingOrg({
+                            ...editingOrg,
+                            module_visibility: {
+                              ...editingOrg.module_visibility,
+                              [modKey]: e.target.checked,
+                            },
+                          })
+                        }
+                        className="rounded text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <span className="capitalize">{modKey.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-border pt-3 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsEditOrgModalOpen(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOrg}
+                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-95 active:scale-95"
+                >
+                  {isSavingOrg ? "Saving..." : "Save Organization Settings"}
                 </button>
               </div>
             </form>

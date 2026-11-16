@@ -799,7 +799,7 @@ export class GoogleSheetsService {
    */
   static getGoogleAppsScriptCode(): string {
     return `// =========================================================================
-// AKSHAY RD JEANS FACTORY - GOOGLE SHEETS LIVE MULTI-SHEET SYNC SCRIPT
+// DENIMFLOW ERP - GOOGLE SHEETS LIVE MULTI-SHEET SYNC SCRIPT
 // =========================================================================
 
 function doPost(e) {

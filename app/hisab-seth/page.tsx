@@ -33,7 +33,9 @@ import {
   RotateCcw,
   Sparkles,
   Calendar,
-  UserCheck
+  UserCheck,
+  MessageSquare,
+  Share2
 } from "lucide-react"
 import {
   fetchSethHisabOverview,
@@ -447,6 +449,52 @@ function SethHisabContent() {
     }
   }
 
+  // Handle WhatsApp Sharing
+  const handleShareWhatsApp = (hisab: SethHisabRecord) => {
+    try {
+      const lotsSummary = (hisab.lots || [])
+        .map(
+          (l) =>
+            `• Lot #${l.lot_number} (${l.roll_number}): ${l.piece_count} pcs @ ₹${l.rate_per_piece} = ₹${l.amount.toLocaleString("en-IN")}`
+        )
+        .join("\n")
+
+      const extraText =
+        hisab.extra_charges > 0
+          ? `\n➕ *Extra Charges (${hisab.extra_charges_notes || "Trims/Washing"}):* ₹${hisab.extra_charges.toLocaleString("en-IN")}`
+          : ""
+      const dedText =
+        hisab.deductions > 0
+          ? `\n➖ *Deductions (${hisab.deductions_notes || "Shortage"}):* ₹${hisab.deductions.toLocaleString("en-IN")}`
+          : ""
+
+      const msg = `*DENIMFLOW ERP - SETH HISAB SLIP* 👖
+━━━━━━━━━━━━━━━━━━━━
+📄 *Hisab No:* ${hisab.hisab_number}
+📅 *Date:* ${hisab.hisab_date}
+👤 *Seth Client:* ${hisab.seth_name}
+
+*LOTS & CUTTING BREAKDOWN:*
+${lotsSummary || "No lots specified"}
+
+━━━━━━━━━━━━━━━━━━━━
+📦 *Total Pieces:* ${hisab.total_pieces} pcs
+📏 *Fabric Used:* ${hisab.total_meter_used} m (${hisab.average_consumption} m/pc)
+💰 *Stitching Amount:* ₹${hisab.stitching_amount.toLocaleString("en-IN")}${extraText}${dedText}
+💵 *Gross Total:* ₹${hisab.total_amount.toLocaleString("en-IN")}
+✅ *Paid / Advance:* ₹${hisab.paid_amount.toLocaleString("en-IN")} (${hisab.payment_method})
+⚠️ *Balance Due:* ₹${hisab.balance_amount.toLocaleString("en-IN")}
+━━━━━━━━━━━━━━━━━━━━
+*Status:* ${hisab.payment_status}
+_Handled by: ${hisab.handled_by || "Factory Manager"}_`
+
+      const encoded = encodeURIComponent(msg)
+      window.open(`https://wa.me/?text=${encoded}`, "_blank")
+    } catch (e: any) {
+      alert("Failed to share on WhatsApp: " + e.message)
+    }
+  }
+
   // Handle Import File Selection & Preview
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
@@ -608,162 +656,182 @@ function SethHisabContent() {
 
   return (
     <main className="min-h-screen bg-background text-foreground pb-24">
-      <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-5 md:px-5 md:py-6">
+      <div className="mx-auto flex max-w-2xl flex-col gap-4 sm:gap-6 px-3 py-4 sm:px-5 sm:py-6">
 
-        {/* Top Header */}
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-card shadow-sm ring-1 ring-border/60 transition-transform active:scale-90 hover:bg-muted"
-            >
-              <ArrowLeft className="h-5 w-5 text-foreground" />
-            </Link>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                <span>Hisab Seth</span>
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  Job Settlement
-                </span>
-              </h1>
-              <p className="text-xs text-muted-foreground">Cutting, stitching completion & roll settlement</p>
+        {/* Top Header - Mobile First */}
+        <header className="flex flex-col gap-3">
+          {/* Top Row: Back Button, Title & Primary Action */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Link
+                href="/"
+                className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full bg-card shadow-xs ring-1 ring-border/60 transition-transform active:scale-90 hover:bg-muted"
+                aria-label="Back to Dashboard"
+              >
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
+              </Link>
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground flex items-center gap-1.5 sm:gap-2">
+                  <span className="truncate">Hisab Seth</span>
+                  <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] sm:text-[10px] font-extrabold text-primary">
+                    Settlement
+                  </span>
+                </h1>
+                <p className="text-[11px] sm:text-xs text-muted-foreground truncate">
+                  Cutting, stitching lots & roll settlement
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-1.5 md:gap-2">
-            {/* Import Button */}
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              className="flex items-center gap-1 rounded-full bg-card px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-xs transition-all"
-              title="Import past hisab data from Excel or CSV"
-            >
-              <Upload className="h-3.5 w-3.5 text-primary" />
-              <span className="hidden sm:inline">Import</span>
-            </button>
-
-            {/* Export Dropdown / Buttons */}
-            <button
-              onClick={() => handleExport("excel")}
-              disabled={isExporting}
-              className="flex items-center gap-1 rounded-full bg-card px-3 py-2 text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-xs transition-all"
-              title="Export all hisab data to Excel (.xlsx)"
-            >
-              <Download className="h-3.5 w-3.5 text-emerald-600" />
-              <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
-            </button>
-
-            {/* Google Sheets Sync Button */}
-            <button
-              onClick={() => {
-                setIsSheetsModalOpen(true)
-                loadSheetsSettings()
-              }}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold transition-all active:scale-95 shadow-xs ${
-                sheetsWebhookUrl
-                  ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600/30 dark:bg-emerald-950/40 dark:text-emerald-300"
-                  : "bg-card text-foreground ring-1 ring-border/70 hover:bg-muted"
-              }`}
-              title="Real-time Google Sheet Sync & Live Backup"
-            >
-              <Cloud className="h-3.5 w-3.5 text-emerald-600" />
-              <span className="hidden sm:inline">Google Sheets</span>
-              {sheetsWebhookUrl && <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
-            </button>
-
-            {/* New Hisab */}
+            {/* Primary Action Button */}
             <button
               onClick={() => handleOpenNewHisab()}
-              className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-all hover:opacity-95 active:scale-95"
+              className="shrink-0 flex items-center gap-1.5 rounded-full bg-primary px-3 sm:px-4 py-2 text-xs font-black text-primary-foreground shadow-sm transition-all hover:opacity-95 active:scale-95"
             >
               <Plus className="h-4 w-4" />
               <span>New Hisab</span>
             </button>
           </div>
+
+          {/* Secondary Actions Toolbar (Always visible & touch-friendly on mobile) */}
+          <div className="flex items-center justify-between gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex items-center gap-1.5">
+              {/* Import Button */}
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-full bg-card px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all whitespace-nowrap"
+                title="Import past hisab data from Excel or CSV"
+              >
+                <Upload className="h-3.5 w-3.5 text-primary" />
+                <span>Import</span>
+              </button>
+
+              {/* Export Button */}
+              <button
+                onClick={() => handleExport("excel")}
+                disabled={isExporting}
+                className="flex items-center gap-1.5 rounded-full bg-card px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all whitespace-nowrap"
+                title="Export all hisab data to Excel (.xlsx)"
+              >
+                <Download className="h-3.5 w-3.5 text-emerald-600" />
+                <span>{isExporting ? "Exporting..." : "Export"}</span>
+              </button>
+
+              {/* Google Sheets Sync Button */}
+              <button
+                onClick={() => {
+                  setIsSheetsModalOpen(true)
+                  loadSheetsSettings()
+                }}
+                className={`flex items-center gap-1.5 rounded-full px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold transition-all active:scale-95 shadow-2xs whitespace-nowrap ${
+                  sheetsWebhookUrl
+                    ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600/30 dark:bg-emerald-950/40 dark:text-emerald-300"
+                    : "bg-card text-foreground ring-1 ring-border/70 hover:bg-muted"
+                }`}
+                title="Real-time Google Sheet Sync & Live Backup"
+              >
+                <Cloud className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Sheets</span>
+                {sheetsWebhookUrl && <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
+              </button>
+            </div>
+
+            {/* Quick Refresh */}
+            <button
+              onClick={() => loadData()}
+              className="flex items-center gap-1 rounded-full bg-card p-1.5 text-muted-foreground ring-1 ring-border/70 hover:text-foreground active:scale-90"
+              title="Refresh Hisab Data"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-primary" : ""}`} />
+            </button>
+          </div>
         </header>
 
         {/* Top Summary Banner */}
-        <div className="relative overflow-hidden rounded-[26px] bg-gradient-to-br from-primary via-primary/95 to-primary/85 p-5 text-primary-foreground shadow-lg shadow-primary/15">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden rounded-2xl sm:rounded-[26px] bg-gradient-to-br from-primary via-primary/95 to-primary/85 p-4 sm:p-5 text-primary-foreground shadow-lg shadow-primary/15">
+          <div className="flex justify-between items-start gap-2">
             <div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-foreground/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-foreground/20 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
                 <Calculator className="h-3 w-3" />
                 Factory Work & Settlement
               </span>
-              <p className="text-2xl font-black tracking-tight mt-2">
+              <p className="text-xl sm:text-2xl font-black tracking-tight mt-1.5">
                 ₹{(overview?.summary?.totalHisabsAmount || 0).toLocaleString("en-IN")}
               </p>
-              <p className="text-xs text-primary-foreground/80 font-medium">Total Seth Hisab Billed</p>
+              <p className="text-[11px] sm:text-xs text-primary-foreground/80 font-medium">Total Seth Hisab Billed</p>
             </div>
 
-            <div className="text-right">
-              <span className="inline-block rounded-lg bg-primary-foreground/15 px-2.5 py-1 text-xs font-black">
+            <div className="text-right shrink-0">
+              <span className="inline-block rounded-lg bg-primary-foreground/15 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-black">
                 {overview?.summary?.readyLotsCount || 0} Lots Ready
               </span>
-              <p className="text-[10px] text-primary-foreground/75 mt-1 font-semibold">
+              <p className="text-[9px] sm:text-[10px] text-primary-foreground/75 mt-1 font-semibold">
                 Stitching Finished
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 border-t border-primary-foreground/20 pt-4 mt-4 text-center">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 border-t border-primary-foreground/20 pt-3 sm:pt-4 mt-3 sm:mt-4 text-center">
             <div className="text-left">
-              <p className="text-[10px] font-bold uppercase text-primary-foreground/70">In Stitching</p>
-              <p className="text-sm font-extrabold mt-0.5">{overview?.summary?.inStitchingCount || 0} lots</p>
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase text-primary-foreground/70">In Stitching</p>
+              <p className="text-xs sm:text-sm font-black mt-0.5">{overview?.summary?.inStitchingCount || 0} lots</p>
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase text-primary-foreground/70">Settled Lots</p>
-              <p className="text-sm font-extrabold mt-0.5">{overview?.summary?.settledLotsCount || 0} lots</p>
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase text-primary-foreground/70">Settled Lots</p>
+              <p className="text-xs sm:text-sm font-black mt-0.5">{overview?.summary?.settledLotsCount || 0} lots</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] font-bold uppercase text-primary-foreground/70">Balance Due</p>
-              <p className="text-sm font-extrabold mt-0.5 text-amber-200">
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase text-primary-foreground/70">Balance Due</p>
+              <p className="text-xs sm:text-sm font-black mt-0.5 text-amber-200">
                 ₹{(overview?.summary?.totalHisabsBalance || 0).toLocaleString("en-IN")}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Seth Filter & Search Bar */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2">
+        {/* Seth Filter & Search Bar - Full Mobile Width */}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div className="relative flex-1">
-              <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search Lot #, Roll #, Seth, or Fabric..."
+                placeholder="Search Lot #, Roll #, Seth..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-2xl bg-card py-2.5 pl-10 pr-4 text-xs font-medium text-foreground ring-1 ring-border/60 shadow-xs focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl sm:rounded-2xl bg-card py-2.5 pl-9 pr-8 text-xs font-medium text-foreground ring-1 ring-border/60 shadow-2xs focus:outline-none focus:ring-2 focus:ring-primary"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
 
-            <select
-              value={selectedSethId}
-              onChange={(e) => setSelectedSethId(e.target.value)}
-              className="rounded-2xl bg-card py-2.5 px-3 text-xs font-bold text-foreground ring-1 ring-border/60 shadow-xs focus:outline-none focus:ring-2 focus:ring-primary max-w-[150px]"
-            >
-              <option value="">All Seths</option>
-              {(overview?.seths || []).map((s: any) => (
-                <option key={s.id} value={String(s.id)}>
-                  {s.seth_name}
-                </option>
-              ))}
-            </select>
+            <div className="relative w-full sm:w-auto">
+              <select
+                value={selectedSethId}
+                onChange={(e) => setSelectedSethId(e.target.value)}
+                className="w-full sm:w-auto rounded-xl sm:rounded-2xl bg-card py-2.5 px-3 text-xs font-bold text-foreground ring-1 ring-border/60 shadow-2xs focus:outline-none focus:ring-2 focus:ring-primary min-w-[140px]"
+              >
+                <option value="">All Seths ({overview?.seths?.length || 0})</option>
+                {(overview?.seths || []).map((s: any) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.seth_name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Quick status filters */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-3 px-3 sm:mx-0 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
               { id: "all", label: "All Items" },
-              { id: "ready", label: `Ready for Hisab (${overview?.summary?.readyLotsCount || 0})` },
+              { id: "ready", label: `Ready (${overview?.summary?.readyLotsCount || 0})` },
               { id: "in_stitching", label: `In Stitching (${overview?.summary?.inStitchingCount || 0})` },
               { id: "settled", label: `Settled (${overview?.summary?.settledLotsCount || 0})` }
             ].map((f) => (
@@ -782,42 +850,50 @@ function SethHisabContent() {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex border-b border-border/80 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Tab Navigation (Segmented Control - Fits perfectly on mobile screens) */}
+        <div className="grid grid-cols-3 gap-1 rounded-2xl bg-muted/60 p-1 ring-1 ring-border/60">
           <button
             onClick={() => setActiveTab("work")}
-            className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 px-1 text-xs font-bold transition-all ${
               activeTab === "work"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-card text-foreground shadow-xs ring-1 ring-border/70"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Seth Work & Stitching
+            <Scissors className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">Seth Work</span>
+            <span className="sm:hidden">Work & Lots</span>
           </button>
+
           <button
             onClick={() => setActiveTab("ready")}
-            className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 px-1 text-xs font-bold transition-all ${
               activeTab === "ready"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-card text-foreground shadow-xs ring-1 ring-border/70"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>Ready for Hisab</span>
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <span className="hidden sm:inline">Ready for Hisab</span>
+            <span className="sm:hidden">Ready</span>
             {(overview?.summary?.readyLotsCount || 0) > 0 && (
               <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-black text-white">
                 {overview?.summary?.readyLotsCount}
               </span>
             )}
           </button>
+
           <button
             onClick={() => setActiveTab("history")}
-            className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 px-1 text-xs font-bold transition-all ${
               activeTab === "history"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-card text-foreground shadow-xs ring-1 ring-border/70"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>Hisab Bills & Slips</span>
+            <Receipt className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="hidden sm:inline">Bills & Slips</span>
+            <span className="sm:hidden">Slips</span>
             <span className="text-[10px] text-muted-foreground font-semibold">({hisabRecords.length})</span>
           </button>
         </div>
@@ -918,26 +994,26 @@ function SethHisabContent() {
                   {filteredLots.map((lot: any) => (
                     <div
                       key={lot.cutting_id || lot.id}
-                      className="rounded-2xl bg-card p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3 transition-all hover:ring-border"
+                      className="rounded-2xl bg-card p-3.5 sm:p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3 transition-all hover:ring-border"
                     >
                       {/* Lot Header */}
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="flex items-center gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1.5">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="text-sm font-extrabold text-foreground">
                               Lot #{lot.lot_number}
                             </h4>
-                            <span className="text-[11px] text-muted-foreground font-semibold">
+                            <span className="text-[11px] text-muted-foreground font-medium">
                               ({lot.cutting_date})
                             </span>
                           </div>
-                          <p className="text-xs text-muted-foreground font-semibold mt-0.5">
+                          <p className="text-xs text-muted-foreground font-semibold mt-0.5 truncate">
                             {lot.seth_name} • Roll: {lot.roll_number} ({lot.fabric_type})
                           </p>
                         </div>
 
                         {/* Status Badge */}
-                        <div>
+                        <div className="self-start shrink-0">
                           {lot.is_settled ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-950/40 px-2.5 py-0.5 text-[10px] font-extrabold text-purple-700 dark:text-purple-300 ring-1 ring-purple-600/20">
                               <CheckCircle2 className="h-3 w-3" />
@@ -946,7 +1022,7 @@ function SethHisabContent() {
                           ) : lot.is_stitching_completed ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-950/40 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-600/20">
                               <CheckCircle2 className="h-3 w-3" />
-                              Stitching Complete (Ready for Hisab)
+                              Ready for Hisab
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-950/40 px-2.5 py-0.5 text-[10px] font-extrabold text-blue-700 dark:text-blue-300 ring-1 ring-blue-600/20">
@@ -957,32 +1033,32 @@ function SethHisabContent() {
                         </div>
                       </div>
 
-                      {/* Yield Metrics */}
-                      <div className="grid grid-cols-4 gap-2 rounded-xl bg-muted/40 p-2.5 text-center text-[11px]">
-                        <div>
-                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Meter Cut</p>
-                          <p className="font-bold text-foreground mt-0.5">{lot.meter_used} m</p>
+                      {/* Yield Metrics - 2 columns on mobile, 4 on desktop */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 rounded-xl bg-muted/40 p-2 sm:p-2.5 text-center text-xs">
+                        <div className="rounded-lg bg-card/60 p-1.5 sm:bg-transparent sm:p-0">
+                          <p className="text-[10px] uppercase font-bold text-muted-foreground">Meter Cut</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{lot.meter_used} m</p>
                         </div>
-                        <div>
-                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Cut Pieces</p>
-                          <p className="font-bold text-foreground mt-0.5">{lot.piece_count} pcs</p>
+                        <div className="rounded-lg bg-card/60 p-1.5 sm:bg-transparent sm:p-0">
+                          <p className="text-[10px] uppercase font-bold text-muted-foreground">Cut Pieces</p>
+                          <p className="font-extrabold text-foreground mt-0.5">{lot.piece_count} pcs</p>
                         </div>
-                        <div>
-                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Stitched</p>
-                          <p className="font-bold text-emerald-600 mt-0.5">
+                        <div className="rounded-lg bg-card/60 p-1.5 sm:bg-transparent sm:p-0">
+                          <p className="text-[10px] uppercase font-bold text-muted-foreground">Stitched</p>
+                          <p className="font-extrabold text-emerald-600 mt-0.5">
                             {lot.is_stitching_completed ? lot.piece_count : lot.finished_pieces || lot.stitching_pieces || 0} pcs
                           </p>
                         </div>
-                        <div>
-                          <p className="text-[9px] uppercase font-bold text-muted-foreground">Average</p>
-                          <p className="font-bold text-primary mt-0.5">
+                        <div className="rounded-lg bg-card/60 p-1.5 sm:bg-transparent sm:p-0">
+                          <p className="text-[10px] uppercase font-bold text-muted-foreground">Average</p>
+                          <p className="font-extrabold text-primary mt-0.5">
                             {lot.average ? `${lot.average} m/pc` : "-"}
                           </p>
                         </div>
                       </div>
 
                       {/* Action Bar */}
-                      <div className="flex items-center justify-between border-t border-border/50 pt-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border/50 pt-2.5">
                         <span className="text-[10px] text-muted-foreground">
                           {lot.is_settled
                             ? "Included in Seth settlement hisab"
@@ -991,11 +1067,11 @@ function SethHisabContent() {
                             : "Stitching work in progress on sewing floor"}
                         </span>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
                           {!lot.is_settled && !lot.is_stitching_completed && (
                             <button
                               onClick={() => handleMarkStitchingComplete(lot)}
-                              className="rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-600/30 hover:bg-emerald-100 transition-all active:scale-95"
+                              className="flex-1 sm:flex-initial rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-600/30 hover:bg-emerald-100 transition-all active:scale-95 text-center"
                             >
                               ✓ Complete Stitching
                             </button>
@@ -1004,9 +1080,9 @@ function SethHisabContent() {
                           {!lot.is_settled && (
                             <button
                               onClick={() => handleOpenNewHisab(lot)}
-                              className="rounded-lg bg-primary px-3 py-1 text-[11px] font-bold text-primary-foreground shadow-xs hover:opacity-95 transition-all active:scale-95 flex items-center gap-1"
+                              className="flex-1 sm:flex-initial rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 transition-all active:scale-95 flex items-center justify-center gap-1.5"
                             >
-                              <Calculator className="h-3 w-3" />
+                              <Calculator className="h-3.5 w-3.5" />
                               <span>Make Hisab</span>
                             </button>
                           )}
@@ -1046,31 +1122,31 @@ function SethHisabContent() {
                 {(overview?.readyLots || []).map((lot: any) => (
                   <div
                     key={lot.cutting_id || lot.id}
-                    className="rounded-2xl bg-card p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3"
+                    className="rounded-2xl bg-card p-3.5 sm:p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3"
                   >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="text-sm font-extrabold text-foreground">Lot #{lot.lot_number}</h4>
                           <span className="rounded-full bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 text-[9px] font-black text-emerald-700 dark:text-emerald-300">
                             Stitching Complete
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground font-semibold mt-0.5">
+                        <p className="text-xs text-muted-foreground font-semibold mt-0.5 truncate">
                           {lot.seth_name} • Roll: {lot.roll_number} ({lot.fabric_type})
                         </p>
                       </div>
 
                       <button
                         onClick={() => handleOpenNewHisab(lot)}
-                        className="rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 active:scale-95 flex items-center gap-1"
+                        className="w-full sm:w-auto rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 active:scale-95 flex items-center justify-center gap-1.5"
                       >
                         <Calculator className="h-3.5 w-3.5" />
                         <span>Settle Lot</span>
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/40 p-2 text-center text-xs">
+                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl bg-muted/40 p-2 text-center text-xs">
                       <div>
                         <span className="text-[10px] text-muted-foreground font-bold">Cut Pieces</span>
                         <p className="font-extrabold text-foreground mt-0.5">{lot.piece_count} pcs</p>
@@ -1141,11 +1217,11 @@ function SethHisabContent() {
                 {hisabRecords.map((hisab) => (
                 <div
                   key={hisab.id}
-                  className="rounded-2xl bg-card p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3 transition-all hover:ring-border"
+                  className="rounded-2xl bg-card p-3.5 sm:p-4 ring-1 ring-border/60 shadow-xs flex flex-col gap-3 transition-all hover:ring-border"
                 >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1.5">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs font-black text-foreground">
                           {hisab.hisab_number}
                         </span>
@@ -1161,14 +1237,14 @@ function SethHisabContent() {
                           {hisab.payment_status}
                         </span>
                       </div>
-                      <p className="text-xs font-extrabold text-foreground mt-0.5">{hisab.seth_name}</p>
+                      <p className="text-xs font-extrabold text-foreground mt-0.5 truncate">{hisab.seth_name}</p>
                       <p className="text-[10px] text-muted-foreground font-medium">
-                        {hisab.hisab_date} • Handled by {hisab.handled_by}
+                        {hisab.hisab_date} • Handled by {hisab.handled_by || "Manager"}
                       </p>
                     </div>
 
-                    <div className="text-right">
-                      <p className="text-base font-black text-foreground">
+                    <div className="sm:text-right flex sm:flex-col justify-between items-baseline sm:items-end">
+                      <p className="text-base sm:text-lg font-black text-foreground">
                         ₹{hisab.total_amount.toLocaleString("en-IN")}
                       </p>
                       <p className="text-[10px] font-semibold text-muted-foreground">
@@ -1178,7 +1254,7 @@ function SethHisabContent() {
                   </div>
 
                   {/* Financial Breakdown */}
-                  <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/40 p-2.5 text-center text-[11px]">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl bg-muted/40 p-2 sm:p-2.5 text-center text-[11px]">
                     <div>
                       <p className="text-[9px] uppercase font-bold text-muted-foreground">Stitching Rate</p>
                       <p className="font-bold text-foreground mt-0.5">
@@ -1204,14 +1280,25 @@ function SethHisabContent() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between border-t border-border/50 pt-2.5">
-                    <button
-                      onClick={() => setSlipModalRecord(hisab)}
-                      className="flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-xs font-bold text-foreground ring-1 ring-border/60 hover:bg-muted active:scale-95"
-                    >
-                      <Printer className="h-3.5 w-3.5 text-primary" />
-                      <span>Print Slip</span>
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setSlipModalRecord(hisab)}
+                        className="flex items-center gap-1.5 rounded-lg bg-card px-2.5 sm:px-3 py-1.5 text-xs font-bold text-foreground ring-1 ring-border/60 hover:bg-muted active:scale-95"
+                      >
+                        <Printer className="h-3.5 w-3.5 text-primary" />
+                        <span>Slip</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleShareWhatsApp(hisab)}
+                        className="flex items-center gap-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-600/30 px-2.5 sm:px-3 py-1.5 text-xs font-bold hover:bg-emerald-100 active:scale-95"
+                        title="Share Hisab on WhatsApp"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>WhatsApp</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       {hisab.balance_amount > 0 && (
@@ -1246,8 +1333,8 @@ function SethHisabContent() {
       {/* MODAL 1: MAKE NEW SETH HISAB                                             */}
       {/* ========================================================================= */}
       {isNewHisabOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-3xl bg-card p-5 md:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-xl max-h-[94vh] overflow-y-auto rounded-2xl sm:rounded-3xl bg-card p-4 sm:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 sm:gap-5">
 
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border pb-3">
@@ -1269,7 +1356,7 @@ function SethHisabContent() {
             <form onSubmit={handleSaveHisab} className="flex flex-col gap-4">
 
               {/* Step 1: Seth & Date */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-muted-foreground">Select Seth Client</label>
                   <select
@@ -1343,27 +1430,27 @@ function SethHisabContent() {
                               : "bg-card hover:bg-muted/50 text-muted-foreground"
                           }`}
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => {}}
-                              className="h-4 w-4 rounded text-primary focus:ring-primary pointer-events-none"
+                              className="h-4 w-4 rounded text-primary focus:ring-primary pointer-events-none shrink-0"
                             />
-                            <div>
-                              <p className="font-extrabold text-foreground">
+                            <div className="min-w-0">
+                              <p className="font-extrabold text-foreground truncate">
                                 Lot #{l.lot_number}{" "}
                                 <span className="font-normal text-[10px] text-muted-foreground">
                                   ({l.cutting_date})
                                 </span>
                               </p>
-                              <p className="text-[10px] text-muted-foreground">
+                              <p className="text-[10px] text-muted-foreground truncate">
                                 Roll: {l.roll_number} • {l.meter_used}m used • {l.piece_count} pcs
                               </p>
                             </div>
                           </div>
 
-                          <div className="text-right">
+                          <div className="text-right shrink-0">
                             <span
                               className={`rounded-full px-2 py-0.5 text-[9px] font-black ${
                                 l.is_stitching_completed
@@ -1382,7 +1469,7 @@ function SethHisabContent() {
               </div>
 
               {/* Step 3: Stitching Rate & Job Work */}
-              <div className="grid grid-cols-2 gap-3 rounded-2xl bg-muted/30 p-3 ring-1 ring-border/50">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-2xl bg-muted/30 p-3 ring-1 ring-border/50">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-foreground">Job Work / Stitching Rate (₹/pc)</label>
                   <input
@@ -1397,7 +1484,7 @@ function SethHisabContent() {
                   <span className="text-[10px] text-muted-foreground">Applied per piece to selected lots</span>
                 </div>
 
-                <div className="flex flex-col justify-center text-right">
+                <div className="flex flex-col justify-center text-left sm:text-right">
                   <p className="text-[10px] uppercase font-bold text-muted-foreground">Stitching Amount</p>
                   <p className="text-lg font-black text-primary">
                     ₹{modalCalculations.stitchingAmount.toLocaleString("en-IN")}
@@ -1409,7 +1496,7 @@ function SethHisabContent() {
               </div>
 
               {/* Step 4: Extras & Deductions */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-[11px] font-bold text-muted-foreground">Extra Charges (Washing / Trims ₹)</label>
                   <input
@@ -1456,7 +1543,7 @@ function SethHisabContent() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-muted-foreground">Advance / Paid Now</label>
                     <input
@@ -1519,18 +1606,18 @@ function SethHisabContent() {
               </div>
 
               {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-border pt-3">
                 <button
                   type="button"
                   onClick={() => setIsNewHisabOpen(false)}
-                  className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted"
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-muted text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || modalCalculations.selectedLots.length === 0}
-                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-95 disabled:opacity-50 active:scale-95 flex items-center gap-1.5"
+                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-95 disabled:opacity-50 active:scale-95 flex items-center justify-center gap-1.5"
                 >
                   <Calculator className="h-4 w-4" />
                   <span>{isSubmitting ? "Generating..." : "Save & Generate Hisab"}</span>
@@ -1545,21 +1632,29 @@ function SethHisabContent() {
       {/* MODAL 2: PRINTABLE HISAB SLIP                                            */}
       {/* ========================================================================= */}
       {slipModalRecord && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-3xl bg-card p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-card p-4 sm:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[94vh] overflow-y-auto">
 
             {/* Actions Bar (hidden when printing) */}
-            <div className="flex justify-between items-center border-b border-border pb-3 print:hidden">
-              <span className="text-xs font-black uppercase text-muted-foreground">
-                Seth Hisab Statement
+            <div className="flex justify-between items-center border-b border-border pb-3 print:hidden gap-2">
+              <span className="text-xs font-black uppercase text-muted-foreground truncate">
+                Seth Hisab Slip
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <button
+                  onClick={() => handleShareWhatsApp(slipModalRecord)}
+                  className="flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 active:scale-95"
+                  title="Share Slip on WhatsApp"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">WhatsApp</span>
+                </button>
                 <button
                   onClick={() => window.print()}
-                  className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 active:scale-95"
+                  className="flex items-center gap-1.5 rounded-full bg-primary px-3 sm:px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 active:scale-95"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  <span>Print Slip</span>
+                  <span>Print</span>
                 </button>
                 <button
                   onClick={() => setSlipModalRecord(null)}
@@ -1571,10 +1666,10 @@ function SethHisabContent() {
             </div>
 
             {/* Printable Content Area */}
-            <div id="hisab-printable-slip" className="flex flex-col gap-4 p-2 bg-card">
+            <div id="hisab-printable-slip" className="flex flex-col gap-3 sm:gap-4 p-1 sm:p-2 bg-card">
               {/* Slip Header */}
               <div className="text-center border-b border-dashed border-border/80 pb-3">
-                <h2 className="text-xl font-black tracking-tight text-foreground">AKSHAY RD JEANS</h2>
+                <h2 className="text-lg sm:text-xl font-black tracking-tight text-foreground">DENIMFLOW ERP</h2>
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mt-0.5">
                   Denim Garment Manufacturing & Job Work
                 </p>
@@ -1597,38 +1692,40 @@ function SethHisabContent() {
                 </div>
               </div>
 
-              {/* Lots & Fabric Breakdown Table */}
+              {/* Lots & Fabric Breakdown Table (with mobile horizontal scroll) */}
               <div className="flex flex-col gap-1">
                 <p className="text-[10px] font-black uppercase text-muted-foreground">Lots & Cutting Detail</p>
-                <table className="w-full text-left text-[11px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-border/70 text-[9px] uppercase text-muted-foreground">
-                      <th className="py-1">Lot / Roll</th>
-                      <th className="py-1 text-center">Meters</th>
-                      <th className="py-1 text-center">Pieces</th>
-                      <th className="py-1 text-right">Rate</th>
-                      <th className="py-1 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(slipModalRecord.lots || []).map((l, idx) => (
-                      <tr key={idx} className="border-b border-border/40">
-                        <td className="py-1.5 font-bold text-foreground">
-                          #{l.lot_number}
-                          <span className="block text-[9px] font-normal text-muted-foreground">
-                            {l.roll_number} ({l.fabric_type})
-                          </span>
-                        </td>
-                        <td className="py-1.5 text-center text-foreground">{l.meter_used}m</td>
-                        <td className="py-1.5 text-center font-bold text-foreground">{l.piece_count}</td>
-                        <td className="py-1.5 text-right text-foreground">₹{l.rate_per_piece}</td>
-                        <td className="py-1.5 text-right font-extrabold text-foreground">
-                          ₹{l.amount.toLocaleString("en-IN")}
-                        </td>
+                <div className="overflow-x-auto -mx-1 sm:mx-0">
+                  <table className="min-w-full text-left text-[11px] border-collapse">
+                    <thead>
+                      <tr className="border-b border-border/70 text-[9px] uppercase text-muted-foreground">
+                        <th className="py-1 px-1">Lot / Roll</th>
+                        <th className="py-1 px-1 text-center">Meters</th>
+                        <th className="py-1 px-1 text-center">Pieces</th>
+                        <th className="py-1 px-1 text-right">Rate</th>
+                        <th className="py-1 px-1 text-right">Amount</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(slipModalRecord.lots || []).map((l, idx) => (
+                        <tr key={idx} className="border-b border-border/40">
+                          <td className="py-1.5 px-1 font-bold text-foreground">
+                            #{l.lot_number}
+                            <span className="block text-[9px] font-normal text-muted-foreground">
+                              {l.roll_number} ({l.fabric_type})
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-1 text-center text-foreground">{l.meter_used}m</td>
+                          <td className="py-1.5 px-1 text-center font-bold text-foreground">{l.piece_count}</td>
+                          <td className="py-1.5 px-1 text-right text-foreground">₹{l.rate_per_piece}</td>
+                          <td className="py-1.5 px-1 text-right font-extrabold text-foreground">
+                            ₹{l.amount.toLocaleString("en-IN")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Totals Summary */}
@@ -1694,7 +1791,7 @@ function SethHisabContent() {
                 </div>
                 <div className="text-right">
                   <p className="text-muted-foreground font-semibold">Authorized Signatory:</p>
-                  <p className="font-bold text-foreground mt-4">For AKSHAY RD JEANS</p>
+                  <p className="font-bold text-foreground mt-4">For DENIMFLOW ERP</p>
                 </div>
               </div>
             </div>
@@ -1812,8 +1909,8 @@ function SethHisabContent() {
       {/* MODAL 4: IMPORT SETH HISAB DATA                                          */}
       {/* ========================================================================= */}
       {isImportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-3xl bg-card p-5 md:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-card p-4 sm:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[94vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
@@ -1966,8 +2063,8 @@ function SethHisabContent() {
       {/* MODAL 5: GOOGLE SHEETS REAL-TIME SYNC CONFIG                             */}
       {/* ========================================================================= */}
       {isSheetsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-3xl bg-card p-5 md:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-card p-4 sm:p-6 shadow-2xl ring-1 ring-border flex flex-col gap-4 text-foreground max-h-[94vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>

@@ -95,6 +95,20 @@ export async function proxy(request: NextRequest) {
     if (payload.id) {
       requestHeaders.set("x-user-id", String(payload.id))
     }
+    if (payload.role) {
+      requestHeaders.set("x-user-role", String(payload.role))
+    }
+
+    // Strict Tenant Isolation Guard:
+    // Regular users are strictly locked to their assigned organization (prevent tampering/jumping)
+    const isSuper = payload.role === "SuperAdmin"
+    let activeOrg = "rd-jeans-main"
+    if (!isSuper && payload.org_slug) {
+      activeOrg = String(payload.org_slug)
+    } else {
+      activeOrg = request.cookies.get("rd_active_org")?.value || (payload.org_slug || "rd-jeans-main")
+    }
+    requestHeaders.set("x-tenant-org", activeOrg)
 
     return NextResponse.next({
       request: {
@@ -122,10 +136,12 @@ export async function proxy(request: NextRequest) {
       return response
     }
 
-    // If authenticated user visits /login, redirect to dashboard
+    // If authenticated user visits /login, redirect to destination or dashboard
     if (userCookie) {
-      const dashboardUrl = new URL("/", request.url)
-      return NextResponse.redirect(dashboardUrl)
+      const fromParam = searchParams.get("from")
+      const targetPath = fromParam && fromParam.startsWith("/") ? fromParam : "/"
+      const redirectUrl = new URL(targetPath, request.url)
+      return NextResponse.redirect(redirectUrl)
     }
 
     // Unauthenticated user can view /login
@@ -135,6 +151,9 @@ export async function proxy(request: NextRequest) {
   // Protected pages: Not logged in -> Redirect to /login
   if (!userCookie) {
     const loginUrl = new URL("/login", request.url)
+    if (pathname && pathname !== "/") {
+      loginUrl.searchParams.set("from", pathname + (request.nextUrl.search || ""))
+    }
     return NextResponse.redirect(loginUrl)
   }
 

@@ -19,7 +19,13 @@ describe('SuperAdminService Unit Tests', () => {
           toArray: vi.fn().mockImplementation(async () => [...docStore])
         }),
         findOne: vi.fn().mockImplementation(async (query: any) => {
-          return docStore.find(d => Object.keys(query).every(k => d[k] === query[k])) || null
+          return docStore.find(d => Object.keys(query).every(k => {
+            const q = query[k]
+            if (q && q.$regex) {
+              return q.$regex.test(d[k])
+            }
+            return d[k] === q
+          })) || null
         }),
         insertOne: vi.fn().mockImplementation(async (doc: any) => {
           docStore.push({ ...doc })
@@ -64,9 +70,11 @@ describe('SuperAdminService Unit Tests', () => {
     }
 
     vi.spyOn(mongoModule, 'getMongoDb').mockResolvedValue(mockDb as any)
+    vi.spyOn(mongoModule, 'getMongoClient').mockResolvedValue({ db: () => mockDb } as any)
+    vi.spyOn(mongoModule, 'getNextSequence').mockResolvedValue(1001)
   })
 
-  it('1. should authenticate Super Admin with AkshayGohel21 / Akshay21', async () => {
+  it('1. should authenticate Super Admin with initial credentials from database', async () => {
     const successResult = await SuperAdminService.authenticate('AkshayGohel21', 'Akshay21')
     expect(successResult.authenticated).toBe(true)
     expect(successResult.token).toBeDefined()
@@ -75,6 +83,26 @@ describe('SuperAdminService Unit Tests', () => {
 
     const failResult = await SuperAdminService.authenticate('AkshayGohel21', 'WrongPassword')
     expect(failResult.authenticated).toBe(false)
+  })
+
+  it('1b. should verify passwords dynamically from database and reject old password after update', async () => {
+    // 1. Update password dynamically via createUser/updateUser
+    await SuperAdminService.createUser({
+      username: 'AkshayGohel21',
+      password: 'BrandNewSecurePassword2026',
+      role: 'SuperAdmin',
+      status: 'Active'
+    })
+
+    // 2. Old password must now fail
+    const oldPassResult = await SuperAdminService.authenticate('AkshayGohel21', 'Akshay21')
+    expect(oldPassResult.authenticated).toBe(false)
+
+    // 3. New password must authenticate successfully
+    const newPassResult = await SuperAdminService.authenticate('AkshayGohel21', 'BrandNewSecurePassword2026')
+    expect(newPassResult.authenticated).toBe(true)
+    expect(newPassResult.user?.username).toBe('AkshayGohel21')
+    expect(newPassResult.user?.role).toBe('SuperAdmin')
   })
 
   it('2. should return default super admin settings including 12 module visibility and dropdown categories', async () => {

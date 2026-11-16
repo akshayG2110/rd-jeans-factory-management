@@ -5,14 +5,10 @@ import {
   generateToken,
   verifyToken,
   getAuthenticatedUser,
+  isSuperAdminRequest,
   ensureDefaultUser
 } from '@/lib/auth'
-import * as db from '@/lib/db'
-
-vi.mock('@/lib/db', () => ({
-  query: vi.fn(),
-  getClient: vi.fn()
-}))
+import * as mongoModule from '@/lib/mongodb'
 
 describe('lib/auth.ts - Authentication & Cryptography Unit Tests', () => {
   beforeEach(() => {
@@ -165,39 +161,87 @@ describe('lib/auth.ts - Authentication & Cryptography Unit Tests', () => {
     })
   })
 
-  describe('ensureDefaultUser()', () => {
-    it('should_seed_default_admin_when_users_table_is_empty', async () => {
-      // Arrange
-      vi.mocked(db.query)
-        .mockResolvedValueOnce({ rows: [{ count: '0' }] } as any)
-        .mockResolvedValueOnce({ rows: [] } as any)
-
-      // Act
-      await ensureDefaultUser()
-
-      // Assert
-      expect(db.query).toHaveBeenCalledWith('SELECT COUNT(*) as count FROM users')
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO users'),
-        expect.arrayContaining(['rdjeans123'])
-      )
+  describe('isSuperAdminRequest()', () => {
+    it('should_return_true_when_valid_super_admin_jwt_is_provided', () => {
+      const token = generateToken({ sub: 'admin_rahul', role: 'SuperAdmin' })
+      const req = new Request('http://localhost:3000/api/organizations', {
+        headers: {
+          cookie: `super_admin_token=${token}`
+        }
+      })
+      expect(isSuperAdminRequest(req)).toBe(true)
     })
 
-    it('should_upgrade_plaintext_password_when_existing_record_has_cleartext', async () => {
-      // Arrange
-      vi.mocked(db.query)
-        .mockResolvedValueOnce({ rows: [{ count: '1' }] } as any)
-        .mockResolvedValueOnce({ rows: [{ id: 1, password_hash: 'RD@123' }] } as any)
-        .mockResolvedValueOnce({ rows: [] } as any)
+    it('should_return_false_when_plain_cookie_is_spoofed_without_valid_jwt', () => {
+      const req = new Request('http://localhost:3000/api/organizations', {
+        headers: {
+          cookie: 'super_admin_user=AkshayGohel21'
+        }
+      })
+      expect(isSuperAdminRequest(req)).toBe(false)
+    })
 
-      // Act
+    it('should_return_false_when_jwt_has_operator_role', () => {
+      const token = generateToken({ sub: 'operator_1', role: 'Operator' })
+      const req = new Request('http://localhost:3000/api/organizations', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+      expect(isSuperAdminRequest(req)).toBe(false)
+    })
+  })
+
+  describe('ensureDefaultUser()', () => {
+    let mockUsersCol: any
+    let docStore: any[]
+
+    beforeEach(() => {
+      docStore = []
+      mockUsersCol = {
+        countDocuments: vi.fn(async (query?: any) => {
+          if (!query || Object.keys(query).length === 0) return docStore.length
+          return docStore.filter(d => Object.keys(query).every(k => d[k] === query[k])).length
+        }),
+        findOne: vi.fn(async (query: any) => docStore.find(d => Object.keys(query).every(k => d[k] === query[k])) || null),
+        insertOne: vi.fn(async (doc: any) => {
+          docStore.push({ ...doc })
+          return { acknowledged: true }
+        }),
+        updateOne: vi.fn(async (query: any, update: any) => {
+          const doc = docStore.find(d => Object.keys(query).every(k => d[k] === query[k]))
+          if (doc && update?.$set) Object.assign(doc, update.$set)
+          return { acknowledged: true }
+        })
+      }
+
+      vi.spyOn(mongoModule, 'getMongoDb').mockResolvedValue({
+        collection: vi.fn(() => mockUsersCol)
+      } as any)
+    })
+
+    it('should_seed_default_users_when_collection_is_completely_empty', async () => {
+      await ensureDefaultUser()
+      expect(docStore.length).toBe(2)
+      expect(docStore.some(u => u.username === 'rdjeans123')).toBe(true)
+      expect(docStore.some(u => u.username === 'AkshayGohel21' && u.role === 'SuperAdmin')).toBe(true)
+    })
+
+    it('should_never_overwrite_passwords_when_users_already_exist', async () => {
+      // Pre-seed an existing user with customized password
+      docStore.push({
+        id: 1,
+        username: 'AkshayGohel21',
+        password_hash: '$2b$10$customized_super_admin_hash_that_must_never_be_wiped',
+        role: 'SuperAdmin',
+        status: 'Active'
+      })
+
       await ensureDefaultUser()
 
-      // Assert
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE users SET password_hash = $1 WHERE id = $2'),
-        expect.any(Array)
-      )
+      // The existing password hash must remain 100% untouched
+      expect(docStore[0].password_hash).toBe('$2b$10$customized_super_admin_hash_that_must_never_be_wiped')
+      expect(mockUsersCol.updateOne).not.toHaveBeenCalled()
     })
   })
 })

@@ -40,6 +40,45 @@ export function verifyToken(token: string): Record<string, any> | null {
   }
 }
 
+/**
+ * Checks whether the incoming HTTP request is authenticated as Super Admin
+ * Cryptographically verifies JWT token or checks trusted middleware header
+ */
+export function isSuperAdminRequest(request: Request): boolean {
+  try {
+    const cookieHeader = request.headers.get('cookie') || ''
+
+    // 1. Verify cryptographic super_admin_token in cookie or Authorization header
+    let token = ''
+    const match = cookieHeader.match(/super_admin_token=([^;]+)/)
+    if (match) {
+      token = match[1]
+    } else {
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization')
+      if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+        token = authHeader.substring(7).trim()
+      }
+    }
+
+    if (token) {
+      const payload = verifyToken(token)
+      if (payload && payload.role === 'SuperAdmin') {
+        return true
+      }
+    }
+
+    // 2. Injected headers from middleware (after cryptographic verification)
+    const userRole = request.headers.get('x-user-role')
+    if (userRole === 'SuperAdmin') {
+      return true
+    }
+  } catch {
+    return false
+  }
+
+  return false
+}
+
 export async function getAuthenticatedUser(request: Request): Promise<{ id?: number; username: string } | null> {
   // Check injected headers from middleware
   const headerUserId = request.headers.get('x-user-id')
@@ -84,30 +123,24 @@ export async function ensureDefaultUser() {
     const db = await getMongoDb()
     const usersCol = db.collection('users')
     
-    // Default Operator user (rdjeans123)
-    const user = await usersCol.findOne({ username: 'rdjeans123' })
-    if (!user) {
-      const hashed = await hashPassword('RD@123')
+    // Check total count of existing users
+    const totalUsers = await usersCol.countDocuments()
+    
+    if (totalUsers === 0) {
+      // 1. Initial Operator user (seeded ONLY if collection is brand new and empty)
+      const hashedOperator = await hashPassword('RD@123')
       await usersCol.insertOne({
         id: 1,
         username: 'rdjeans123',
         display_name: 'RD Operator',
         role: 'Operator',
         status: 'Active',
-        password_hash: hashed,
+        password_hash: hashedOperator,
         created_at: new Date().toISOString()
       })
-      console.log('Default user (rdjeans123) seeded into MongoDB Atlas.')
-    } else if (user.password_hash === 'RD@123') {
-      const hashed = await hashPassword('RD@123')
-      await usersCol.updateOne({ _id: user._id }, { $set: { password_hash: hashed } })
-      console.log('Migrated rdjeans123 clear-text password to bcrypt in MongoDB Atlas.')
-    }
 
-    // Super Admin user: AkshayGohel21 / Akshay21
-    const superAdmin = await usersCol.findOne({ username: 'AkshayGohel21' })
-    const hashedSuperAdmin = await hashPassword('Akshay21')
-    if (!superAdmin) {
+      // 2. Initial Super Admin user (seeded ONLY if collection is brand new and empty)
+      const hashedSuperAdmin = await hashPassword('Akshay21')
       await usersCol.insertOne({
         id: 999,
         username: 'AkshayGohel21',
@@ -117,15 +150,25 @@ export async function ensureDefaultUser() {
         password_hash: hashedSuperAdmin,
         created_at: new Date().toISOString()
       })
-      console.log('Super Admin (AkshayGohel21) seeded into MongoDB Atlas.')
-    } else {
-      const isValid = await verifyPassword('Akshay21', superAdmin.password_hash)
-      if (!isValid || superAdmin.role !== 'SuperAdmin') {
-        await usersCol.updateOne(
-          { _id: superAdmin._id },
-          { $set: { password_hash: hashedSuperAdmin, role: 'SuperAdmin', status: 'Active' } }
-        )
-      }
+      console.log('Fresh database: Initial default accounts seeded into MongoDB Atlas.')
+      return
+    }
+
+    // If database already has users, ensure at least one active SuperAdmin account exists
+    // NEVER overwrite passwords of existing accounts.
+    const superAdminCount = await usersCol.countDocuments({ role: 'SuperAdmin' })
+    if (superAdminCount === 0) {
+      const hashedSuperAdmin = await hashPassword('Akshay21')
+      await usersCol.insertOne({
+        id: 999,
+        username: 'AkshayGohel21',
+        display_name: 'Super Admin',
+        role: 'SuperAdmin',
+        status: 'Active',
+        password_hash: hashedSuperAdmin,
+        created_at: new Date().toISOString()
+      })
+      console.log('Seeded initial SuperAdmin account into MongoDB Atlas.')
     }
   } catch (err) {
     console.error('ensureDefaultUser error:', err)

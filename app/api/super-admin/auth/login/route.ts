@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       maxAge: 86400 * 7 // 7 days
     })
 
-    response.cookies.set('super_admin_user', authResult.user?.username || 'AkshayGohel21', {
+    response.cookies.set('super_admin_user', authResult.user?.username || '', {
       httpOnly: false,
       sameSite: 'lax',
       path: '/',

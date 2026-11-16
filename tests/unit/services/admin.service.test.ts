@@ -156,7 +156,7 @@ describe('AdminService Unit Tests', () => {
 
   it('1. should return default factory settings and save updates', async () => {
     const settings = await AdminService.getSettings()
-    expect(settings.company_name).toBe('Akshay RD Jeans Factory')
+    expect(settings.company_name).toBe('DenimFlow ERP')
     expect(settings.default_stitching_rate).toBe(50)
     expect(settings.fabric_types.length).toBeGreaterThan(0)
 
@@ -188,7 +188,7 @@ describe('AdminService Unit Tests', () => {
   it('3. should create a full database backup archive', async () => {
     const backup = await AdminService.createDatabaseBackup()
     expect(backup.metadata).toBeDefined()
-    expect(backup.metadata.factory).toBe('Akshay RD Jeans Factory')
+    expect(backup.metadata.factory).toBe('DenimFlow ERP')
     expect(backup.collections.employees).toBeDefined()
     expect(backup.collections.employees.length).toBe(1)
     expect(backup.collections.seths.length).toBe(1)

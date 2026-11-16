@@ -567,7 +567,7 @@ export class SethHisabService {
   static async exportExcel(filters?: { seth_id?: number; payment_status?: string; search?: string }): Promise<Buffer> {
     const hisabs = await this.getAll(filters)
     const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'Akshay RD Jeans Factory'
+    workbook.creator = 'DenimFlow ERP'
     workbook.created = new Date()
 
     // Sheet 1: Hisab Statements Summary

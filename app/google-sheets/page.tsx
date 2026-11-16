@@ -183,6 +183,11 @@ export default function GoogleSheetsSyncPage() {
   const [syncedModules, setSyncedModules] = useState<string[]>([])
   const [scriptCode, setScriptCode] = useState("")
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [organization, setOrganization] = useState({
+    name: "DenimFlow Factory",
+    slug: "rd-jeans-main",
+    database_name: "rd_jeans_factory",
+  })
 
   // Loading & feedback states
   const [isTesting, setIsTesting] = useState(false)
@@ -209,6 +214,9 @@ export default function GoogleSheetsSyncPage() {
         setScriptCode(json.data.script_code || "")
         if (json.data.counts) {
           setCounts(json.data.counts)
+        }
+        if (json.data.organization) {
+          setOrganization(json.data.organization)
         }
       }
     } catch (err) {
@@ -380,6 +388,26 @@ export default function GoogleSheetsSyncPage() {
             </button>
           </div>
         </header>
+
+        {/* Active Organization Isolation Notice */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl bg-card p-4 shadow-xs ring-1 ring-border/70">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground font-black text-sm">
+              {organization.name ? organization.name.slice(0, 2).toUpperCase() : "RD"}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-extrabold text-foreground">{organization.name}</h3>
+                <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-black text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20">
+                  Isolated Workspace Sync
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Database: <code className="font-mono text-foreground font-semibold">{organization.database_name}</code> • Only this organization's data is synced to your Google Sheet.
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* Global Factory Sync Result Banner */}
         {syncAllResult && (

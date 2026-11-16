@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleSheetsService } from '@/lib/services/google-sheets'
+import { organizationsService, DEFAULT_ORG_SLUG } from '@/lib/services/organizations'
+import { cookies } from 'next/headers'
 
 export async function GET() {
   try {
@@ -7,10 +9,19 @@ export async function GET() {
     const scriptCode = GoogleSheetsService.getGoogleAppsScriptCode()
     const counts = await GoogleSheetsService.getCounts()
 
+    const cookieStore = await cookies()
+    const activeSlug = cookieStore.get('rd_active_org')?.value || DEFAULT_ORG_SLUG
+    const org = await organizationsService.getOrganizationBySlug(activeSlug)
+
     return NextResponse.json({
       success: true,
       data: {
         ...settings,
+        organization: {
+          name: org?.name || 'DenimFlow Factory',
+          slug: org?.slug || DEFAULT_ORG_SLUG,
+          database_name: org?.database_name || 'rd_jeans_factory',
+        },
         script_code: scriptCode,
         counts
       }

@@ -42,7 +42,10 @@ export default function LoginPage() {
         if (data.user?.token) {
           document.cookie = `rd_token=${data.user.token}; path=/; max-age=86400; SameSite=Lax`
         }
-        window.location.href = "/"
+        const params = new URLSearchParams(window.location.search)
+        const fromParam = params.get("from")
+        const destination = fromParam && fromParam.startsWith("/") ? fromParam : "/"
+        window.location.href = destination
       } else {
         const detailMsg = typeof data.detail === "string" ? data.detail : data.detail?.message
         setError(detailMsg || data.message || "Invalid username or password")
@@ -55,14 +58,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
-      <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-3 sm:px-4 dark:bg-gray-950">
+      <div className="w-full max-w-md rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-8 shadow-xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/5">
         <div className="text-center">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-600 font-black text-xl text-white shadow-lg shadow-indigo-600/30">
+            DF
+          </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">
-            RD Jeans Login
+            DenimFlow ERP
           </h1>
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            Factory Management System
+          <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+            Intelligent Garment &amp; Factory Management OS
           </p>
         </div>
 

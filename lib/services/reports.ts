@@ -343,7 +343,7 @@ export class ReportService {
   static async generateExcel(category: string, filters: ReportFilterParams = {}): Promise<Buffer> {
     const data = await this.exportData(category, filters)
     const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'RD Jeans Factory Management System'
+    workbook.creator = 'DenimFlow ERP'
     workbook.created = new Date()
 
     const catName = category.toUpperCase().replace('-', ' ')
@@ -352,7 +352,7 @@ export class ReportService {
     // Title & Metadata
     worksheet.mergeCells('A1:G1')
     const titleCell = worksheet.getCell('A1')
-    titleCell.value = `RD JEANS FACTORY - ${catName} REPORT`
+    titleCell.value = `DENIMFLOW ERP - ${catName} REPORT`
     titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } }
     titleCell.fill = {
       type: 'pattern',
@@ -365,7 +365,7 @@ export class ReportService {
     // Subtitle / Filter Info
     worksheet.mergeCells('A2:G2')
     const subCell = worksheet.getCell('A2')
-    const dateRangeStr = (filters.date_from || filters.date_to) 
+    const dateRangeStr = (filters.date_from || filters.date_to)
       ? `Date Range: ${filters.date_from || 'Beginning'} to ${filters.date_to || 'Present'}`
       : `Generated: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
     subCell.value = `${dateRangeStr} | Total Records: ${data.length}`
@@ -465,7 +465,7 @@ export class ReportService {
     doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(18)
-    doc.text('RD JEANS FACTORY', 40, 30)
+    doc.text('DENIMFLOW ERP', 40, 30)
 
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(11)
@@ -476,8 +476,8 @@ export class ReportService {
     const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
     const rightX = doc.internal.pageSize.getWidth() - 40
     doc.text(`Generated: ${dateStr}`, rightX, 30, { align: 'right' })
-    const filterInfo = (filters.date_from || filters.date_to) 
-      ? `Period: ${filters.date_from || 'Start'} to ${filters.date_to || 'End'}` 
+    const filterInfo = (filters.date_from || filters.date_to)
+      ? `Period: ${filters.date_from || 'Start'} to ${filters.date_to || 'End'}`
       : 'All Recorded Records'
     doc.text(filterInfo, rightX, 48, { align: 'right' })
 
@@ -529,7 +529,7 @@ export class ReportService {
         doc.setFontSize(8)
         doc.setTextColor(148, 163, 184)
         doc.text(
-          `Page ${pageNum} | RD Jeans Factory Confidential ERP Report`,
+          `Page ${pageNum} | DenimFlow ERP Confidential Report`,
           doc.internal.pageSize.getWidth() / 2,
           doc.internal.pageSize.getHeight() - 20,
           { align: 'center' }

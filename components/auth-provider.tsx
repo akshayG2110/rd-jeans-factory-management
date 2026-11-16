@@ -25,8 +25,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       // If cookies exist but localStorage was cleared, heal localStorage
       if (!userStr && hasCookie) {
         const match = document.cookie.match(/rd_user=([^;]+)/)
-        const username = match ? decodeURIComponent(match[1]) : "rdjeans123"
-        localStorage.setItem("rd_user", JSON.stringify({ username }))
+        if (match) {
+          const username = decodeURIComponent(match[1])
+          localStorage.setItem("rd_user", JSON.stringify({ username }))
+        }
       }
     }
 

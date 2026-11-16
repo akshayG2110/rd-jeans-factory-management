@@ -28,7 +28,7 @@ export async function getMongoClient(): Promise<MongoClient> {
 
   if (!global._mongoClientPromise) {
     const client = new MongoClient(uri, options)
-    global._mongoClientPromise = client.connect().catch(err => {
+    global._mongoClientPromise = client.connect().catch((err) => {
       global._mongoClientPromise = undefined
       throw err
     })
@@ -38,18 +38,56 @@ export async function getMongoClient(): Promise<MongoClient> {
 }
 
 /**
- * Returns the MongoDB Database instance (defaults to rd_jeans_factory)
+ * Returns the MongoDB Database instance.
+ * Automatically resolves tenant database based on the active organization context:
+ * 1. If explicit dbName is passed and != default, use that dbName.
+ * 2. Checks incoming request header 'x-tenant-db' or 'x-tenant-org'.
+ * 3. Checks incoming cookie 'rd_active_org'.
+ * 4. Falls back to defaultDbName ('rd_jeans_factory').
  */
-export async function getMongoDb(dbName: string = defaultDbName): Promise<Db> {
+export async function getMongoDb(dbName?: string): Promise<Db> {
   const clientInstance = await getMongoClient()
-  return clientInstance.db(dbName)
+
+  if (dbName && dbName !== defaultDbName) {
+    return clientInstance.db(dbName)
+  }
+
+  let resolvedDbName = defaultDbName
+
+  try {
+    const { cookies, headers } = await import('next/headers')
+    const headerStore = await headers()
+    const cookieStore = await cookies()
+
+    const headerDb = headerStore.get('x-tenant-db')
+    const headerOrg = headerStore.get('x-tenant-org')
+    const cookieOrg = cookieStore.get('rd_active_org')?.value
+
+    if (headerDb && headerDb !== defaultDbName) {
+      resolvedDbName = headerDb
+    } else if (headerOrg && headerOrg !== 'rd-jeans-main') {
+      resolvedDbName = headerOrg.startsWith('rd_tenant_')
+        ? headerOrg
+        : `rd_tenant_${headerOrg.replace(/-/g, '_')}`
+    } else if (cookieOrg && cookieOrg !== 'rd-jeans-main') {
+      resolvedDbName = cookieOrg.startsWith('rd_tenant_')
+        ? cookieOrg
+        : `rd_tenant_${cookieOrg.replace(/-/g, '_')}`
+    }
+  } catch {
+    // Outside request context (scripts, migrations, test runner)
+    resolvedDbName = defaultDbName
+  }
+
+  return clientInstance.db(resolvedDbName)
 }
 
 /**
  * Generates an atomic sequential integer ID for collection items (1, 2, 3...)
+ * Uses the active tenant database context unless overridden.
  */
-export async function getNextSequence(collectionName: string): Promise<number> {
-  const db = await getMongoDb()
+export async function getNextSequence(collectionName: string, dbName?: string): Promise<number> {
+  const db = await getMongoDb(dbName)
   const result = await db.collection('counters').findOneAndUpdate(
     { _id: collectionName as any },
     { $inc: { seq: 1 } },
@@ -57,5 +95,3 @@ export async function getNextSequence(collectionName: string): Promise<number> {
   )
   return result?.seq || 1
 }
-
-export default getMongoClient

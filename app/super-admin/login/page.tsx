@@ -75,10 +75,10 @@ export default function SuperAdminLoginPage() {
             </span>
             
             <h1 className="mt-3 text-2xl font-black tracking-tight text-white">
-              Super Admin Portal
+              DenimFlow Control Center
             </h1>
             <p className="mt-1.5 text-xs text-slate-400">
-              RD Jeans Factory Master Administration &amp; Dropdown Controls
+              Super Admin Multi-Organization Cloud &amp; Dropdown Controls
             </p>
           </div>
 
@@ -105,7 +105,7 @@ export default function SuperAdminLoginPage() {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. AkshayGohel21"
+                  placeholder="Enter Super Admin username"
                   className="w-full rounded-2xl border-0 bg-slate-800/80 pl-10 pr-4 py-3 text-sm text-white placeholder:text-slate-500 ring-1 ring-slate-700/80 transition-all focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                 />
               </div>

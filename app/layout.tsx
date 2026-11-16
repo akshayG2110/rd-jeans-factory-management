@@ -11,8 +11,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'RD Jeans Factory — Management System',
-  description: 'Factory management dashboard for RD Jeans Factory',
+  title: 'DenimFlow ERP — Intelligent Garment & Factory Management System',
+  description: 'Factory management dashboard for DenimFlow ERP',
   generator: 'v0.app',
   icons: {
     icon: [

@@ -3,7 +3,7 @@ import { proxy as middleware } from '@/proxy'
 import { NextRequest } from 'next/server'
 import { SignJWT } from 'jose'
 
-const JWT_SECRET = 'test_secret_key_for_vitest_unit_testing_minimum_32_characters'
+const JWT_SECRET = process.env.SECRET_KEY || process.env.JWT_SECRET || 'test_secret_key_for_vitest_unit_testing_minimum_32_characters'
 const encodedSecret = new TextEncoder().encode(JWT_SECRET)
 
 async function createTestToken(payload: Record<string, any>) {

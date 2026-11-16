@@ -21,7 +21,7 @@ export interface FactorySettings {
 }
 
 export const DEFAULT_FACTORY_SETTINGS: FactorySettings = {
-  company_name: 'Akshay RD Jeans Factory',
+  company_name: 'DenimFlow ERP',
   owner_name: 'Akshay Gohel',
   phone: '9898000000',
   email: 'akshaygohel8195@gmail.com',
@@ -154,7 +154,7 @@ export class AdminService {
       id: u.id || 1,
       username: u.username,
       display_name: u.display_name || u.username,
-      role: u.role || (u.username === 'rdjeans123' ? 'Admin' : 'Operator'),
+      role: u.role || 'Operator',
       status: u.status || 'Active',
       created_at: u.created_at || new Date().toISOString()
     }))
@@ -258,8 +258,11 @@ export class AdminService {
       throw new Error('User not found')
     }
 
-    if (user.username === 'rdjeans123' || user.id === 1) {
-      throw new Error('Cannot delete primary system Administrator (rdjeans123)')
+    if (user.role === 'Admin') {
+      const activeAdminCount = await db.collection('users').countDocuments({ role: 'Admin', status: { $ne: 'Inactive' } })
+      if (activeAdminCount <= 1) {
+        throw new Error('Cannot delete the last remaining active Administrator account')
+      }
     }
 
     await db.collection('users').deleteOne({ id: Number(id) })
@@ -309,7 +312,7 @@ export class AdminService {
 
     return {
       metadata: {
-        factory: 'Akshay RD Jeans Factory',
+        factory: 'DenimFlow ERP',
         backup_date: new Date().toISOString(),
         version: '1.0.0',
         total_records: totalRecords

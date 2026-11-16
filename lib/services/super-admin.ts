@@ -1,5 +1,6 @@
-import { getMongoDb, getNextSequence } from '../mongodb'
-import { hashPassword, verifyPassword, generateToken } from '../auth'
+import { getMongoClient, getMongoDb, getNextSequence } from '../mongodb'
+import { hashPassword, verifyPassword, generateToken, ensureDefaultUser } from '../auth'
+import { organizationsService, MASTER_REGISTRY_DB } from './organizations'
 
 export interface ModuleVisibilitySettings {
   employees: boolean
@@ -51,7 +52,7 @@ export interface SuperAdminSettings {
 }
 
 export const DEFAULT_SUPER_ADMIN_SETTINGS: SuperAdminSettings = {
-  company_name: 'Akshay RD Jeans Factory',
+  company_name: 'DenimFlow ERP',
   owner_name: 'Akshay Gohel',
   phone: '9898000000',
   email: 'akshaygohel8195@gmail.com',
@@ -167,7 +168,7 @@ export const DEFAULT_SUPER_ADMIN_SETTINGS: SuperAdminSettings = {
 
 export class SuperAdminService {
   /**
-   * Authenticate Super Admin with AkshayGohel21 / Akshay21
+   * Authenticate Super Admin dynamically against MongoDB Atlas users collection
    */
   static async authenticate(username: string, password: string): Promise<{
     authenticated: boolean
@@ -178,42 +179,86 @@ export class SuperAdminService {
     const cleanUser = (username || '').trim()
     const cleanPass = (password || '').trim()
 
-    // Explicit check for Super Admin credentials
-    if (cleanUser === 'AkshayGohel21' && cleanPass === 'Akshay21') {
-      const token = generateToken({ sub: 'AkshayGohel21', role: 'SuperAdmin' })
+    if (!cleanUser || !cleanPass) {
       return {
-        authenticated: true,
-        token,
-        user: {
-          username: 'AkshayGohel21',
-          display_name: 'Akshay Gohel',
-          role: 'SuperAdmin'
-        }
+        authenticated: false,
+        error: 'Username and password are required'
       }
     }
 
-    // Check DB for updated password
     const db = await getMongoDb()
-    const user = await db.collection('users').findOne({ username: cleanUser })
-    if (user && user.role === 'SuperAdmin') {
-      const valid = await verifyPassword(cleanPass, user.password_hash)
-      if (valid) {
-        const token = generateToken({ sub: user.username, role: 'SuperAdmin' })
-        return {
-          authenticated: true,
-          token,
-          user: {
-            username: user.username,
-            display_name: user.display_name || user.username,
-            role: 'SuperAdmin'
-          }
+
+    // Ensure default initial credentials if users collection is empty
+    const count = await db.collection('users').countDocuments()
+    if (count === 0) {
+      await ensureDefaultUser()
+    }
+
+    // Lookup user in tenant database (case-insensitive)
+    let user = await db.collection('users').findOne({
+      username: { $regex: new RegExp(`^${cleanUser}$`, 'i') }
+    })
+
+    // If not found in primary tenant DB, check master registry users directory
+    if (!user) {
+      try {
+        const client = await getMongoClient()
+        const masterDb = client.db(MASTER_REGISTRY_DB)
+        const dirUser = await masterDb.collection('users_directory').findOne({
+          username: { $regex: new RegExp(`^${cleanUser}$`, 'i') }
+        })
+        if (dirUser && dirUser.database_name) {
+          const tenantDb = client.db(dirUser.database_name)
+          user = await tenantDb.collection('users').findOne({
+            username: { $regex: new RegExp(`^${cleanUser}$`, 'i') }
+          })
         }
+      } catch (e) {
+        // Fallback silently if directory lookup fails
       }
     }
 
+    if (!user) {
+      return {
+        authenticated: false,
+        error: 'Invalid Super Admin username or password'
+      }
+    }
+
+    // Role check: Only SuperAdmin accounts are authorized
+    if (user.role !== 'SuperAdmin') {
+      return {
+        authenticated: false,
+        error: 'Access denied: User does not have Super Admin privileges'
+      }
+    }
+
+    // Status check
+    if (user.status && user.status.toLowerCase() === 'inactive') {
+      return {
+        authenticated: false,
+        error: 'This Super Admin account has been deactivated'
+      }
+    }
+
+    // Strict bcrypt hash verification against stored database hash
+    const valid = await verifyPassword(cleanPass, user.password_hash)
+    if (!valid) {
+      return {
+        authenticated: false,
+        error: 'Invalid Super Admin username or password'
+      }
+    }
+
+    const token = generateToken({ sub: user.username, role: 'SuperAdmin' })
     return {
-      authenticated: false,
-      error: 'Invalid Super Admin username or password'
+      authenticated: true,
+      token,
+      user: {
+        username: user.username,
+        display_name: user.display_name || user.username,
+        role: 'SuperAdmin'
+      }
     }
   }
 
@@ -242,10 +287,7 @@ export class SuperAdminService {
         ...DEFAULT_SUPER_ADMIN_SETTINGS.operations,
         ...(rest.operations || {})
       },
-      dropdown_categories: {
-        ...DEFAULT_SUPER_ADMIN_SETTINGS.dropdown_categories,
-        ...(rest.dropdown_categories || {})
-      }
+      dropdown_categories: rest.dropdown_categories || DEFAULT_SUPER_ADMIN_SETTINGS.dropdown_categories
     } as SuperAdminSettings
   }
 
@@ -411,7 +453,7 @@ export class SuperAdminService {
   }
 
   /**
-   * User Management: Create new user
+   * User Management: Create new user or update credentials if user exists
    */
   static async createUser(data: {
     username: string
@@ -419,12 +461,31 @@ export class SuperAdminService {
     display_name?: string
     role?: string
     status?: string
+    org_slug?: string
   }) {
     const db = await getMongoDb()
     const cleanUser = data.username.trim()
-    const existing = await db.collection('users').findOne({ username: cleanUser })
+    const existing = await db.collection('users').findOne({
+      username: { $regex: new RegExp(`^${cleanUser}$`, 'i') }
+    })
+
     if (existing) {
-      throw new Error(`Username "${cleanUser}" already exists`)
+      const updateFields: any = { updated_at: new Date().toISOString() }
+      if (data.password && data.password.trim()) {
+        updateFields.password_hash = await hashPassword(data.password.trim())
+      }
+      if (data.display_name) updateFields.display_name = data.display_name.trim()
+      if (data.role) updateFields.role = data.role
+      if (data.status) updateFields.status = data.status
+
+      await db.collection('users').updateOne({ _id: existing._id }, { $set: updateFields })
+      return {
+        id: existing.id,
+        username: existing.username,
+        display_name: data.display_name?.trim() || existing.display_name || existing.username,
+        role: data.role || existing.role || 'Operator',
+        status: data.status || existing.status || 'Active'
+      }
     }
 
     const id = await getNextSequence('users')
@@ -443,6 +504,22 @@ export class SuperAdminService {
     }
 
     await db.collection('users').insertOne(newUser)
+
+    // Sync into master users directory
+    try {
+      const userOrg = data.org_slug || 'rd-jeans-main'
+      const safeDb = userOrg === 'rd-jeans-main' ? 'rd_jeans_factory' : `rd_tenant_${userOrg.replace(/-/g, '_')}`
+      await organizationsService.registerUserInDirectory({
+        username: newUser.username,
+        org_slug: userOrg,
+        database_name: safeDb,
+        role: newUser.role,
+        status: newUser.status,
+      })
+    } catch (e) {
+      console.warn('Failed to register user in master directory:', e)
+    }
+
     return {
       id,
       username: newUser.username,
@@ -479,8 +556,11 @@ export class SuperAdminService {
     const db = await getMongoDb()
     const user = await db.collection('users').findOne({ id: Number(id) })
     if (!user) throw new Error('User not found')
-    if (user.username === 'AkshayGohel21') {
-      throw new Error('Cannot delete primary Super Admin account (AkshayGohel21)')
+    if (user.role === 'SuperAdmin') {
+      const activeSuperCount = await db.collection('users').countDocuments({ role: 'SuperAdmin', status: { $ne: 'Inactive' } })
+      if (activeSuperCount <= 1) {
+        throw new Error('Cannot delete the last remaining active Super Admin account')
+      }
     }
 
     await db.collection('users').deleteOne({ id: Number(id) })
@@ -521,7 +601,7 @@ export class SuperAdminService {
 
     return {
       metadata: {
-        factory: 'Akshay RD Jeans Factory',
+        factory: 'DenimFlow ERP',
         backup_date: new Date().toISOString(),
         version: '2.0.0 (Super Admin Master Backup)',
         total_records: totalRecords
