@@ -79,23 +79,39 @@ async function cleanDatabase() {
     })
     console.log('  - factory_balance: set to ₹0.00')
 
-    // 4. Ensure admin user (rdjeans123) is preserved and clean
-    console.log('\nEnsuring admin user (rdjeans123)...')
+    // 4. Ensure admin users (rdjeans123 & SuperAdmin AkshayGohel21) are preserved
+    console.log('\nEnsuring default user (rdjeans123) and Super Admin (AkshayGohel21)...')
     await db.collection('users').deleteMany({})
     const salt = await bcrypt.genSalt(10)
     const hash = await bcrypt.hash('RD@123', salt)
-    await db.collection('users').insertOne({
-      id: 1,
-      username: 'rdjeans123',
-      password_hash: hash,
-      created_at: new Date().toISOString()
-    })
+    const superAdminHash = await bcrypt.hash('Akshay21', salt)
+
+    await db.collection('users').insertMany([
+      {
+        id: 1,
+        username: 'rdjeans123',
+        display_name: 'RD Staff Admin',
+        role: 'Admin',
+        status: 'Active',
+        password_hash: hash,
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 999,
+        username: 'AkshayGohel21',
+        display_name: 'Akshay Gohel (Super Admin)',
+        role: 'SuperAdmin',
+        status: 'Active',
+        password_hash: superAdminHash,
+        created_at: new Date().toISOString()
+      }
+    ])
     await db.collection('counters').updateOne(
       { _id: 'users' },
       { $set: { seq: 1 } },
       { upsert: true }
     )
-    console.log('  - users: default user rdjeans123 configured')
+    console.log('  - users: rdjeans123 and AkshayGohel21 configured successfully')
 
     console.log('\n================================================================')
     console.log('               DATABASE CLEANUP VERIFICATION                    ')
