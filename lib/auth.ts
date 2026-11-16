@@ -83,12 +83,17 @@ export async function ensureDefaultUser() {
   try {
     const db = await getMongoDb()
     const usersCol = db.collection('users')
+    
+    // Default Operator user (rdjeans123)
     const user = await usersCol.findOne({ username: 'rdjeans123' })
     if (!user) {
       const hashed = await hashPassword('RD@123')
       await usersCol.insertOne({
         id: 1,
         username: 'rdjeans123',
+        display_name: 'RD Operator',
+        role: 'Operator',
+        status: 'Active',
         password_hash: hashed,
         created_at: new Date().toISOString()
       })
@@ -97,6 +102,30 @@ export async function ensureDefaultUser() {
       const hashed = await hashPassword('RD@123')
       await usersCol.updateOne({ _id: user._id }, { $set: { password_hash: hashed } })
       console.log('Migrated rdjeans123 clear-text password to bcrypt in MongoDB Atlas.')
+    }
+
+    // Super Admin user: AkshayGohel21 / Akshay21
+    const superAdmin = await usersCol.findOne({ username: 'AkshayGohel21' })
+    const hashedSuperAdmin = await hashPassword('Akshay21')
+    if (!superAdmin) {
+      await usersCol.insertOne({
+        id: 999,
+        username: 'AkshayGohel21',
+        display_name: 'Akshay Gohel (Super Admin)',
+        role: 'SuperAdmin',
+        status: 'Active',
+        password_hash: hashedSuperAdmin,
+        created_at: new Date().toISOString()
+      })
+      console.log('Super Admin (AkshayGohel21) seeded into MongoDB Atlas.')
+    } else {
+      const isValid = await verifyPassword('Akshay21', superAdmin.password_hash)
+      if (!isValid || superAdmin.role !== 'SuperAdmin') {
+        await usersCol.updateOne(
+          { _id: superAdmin._id },
+          { $set: { password_hash: hashedSuperAdmin, role: 'SuperAdmin', status: 'Active' } }
+        )
+      }
     }
   } catch (err) {
     console.error('ensureDefaultUser error:', err)

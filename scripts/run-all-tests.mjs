@@ -18,7 +18,7 @@ if (fs.existsSync('.env.local')) {
   }
 }
 
-const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 5000 });
+const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 15000 });
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
 async function log(section, msg, status = 'INFO') {

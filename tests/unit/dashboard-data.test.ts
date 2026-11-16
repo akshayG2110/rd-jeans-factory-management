@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { modules, factorySummary, recentActivities } from '@/lib/dashboard-data'
+import { modules, factorySummary, recentActivities } from '../../lib/dashboard-data'
 
 describe('lib/dashboard-data.ts static config and schemas', () => {
   it('should_export_all_core_navigation_modules_when_inspected', () => {
@@ -17,7 +17,7 @@ describe('lib/dashboard-data.ts static config and schemas', () => {
     ]
 
     // Act
-    const moduleNames = modules.map(m => m.name)
+    const moduleNames = modules.map((m: any) => m.name)
 
     // Assert
     expect(modules).toBeDefined()
@@ -36,7 +36,7 @@ describe('lib/dashboard-data.ts static config and schemas', () => {
 
   it('should_provide_default_factory_summary_metrics_when_initialized', () => {
     // Act
-    const labels = factorySummary.map(s => s.label)
+    const labels = factorySummary.map((s: any) => s.label)
 
     // Assert
     expect(factorySummary).toBeDefined()

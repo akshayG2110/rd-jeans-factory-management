@@ -1,23 +1,66 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import { modules } from "@/lib/dashboard-data"
 import Link from "next/link"
 import { Cloud } from "lucide-react"
 
+const MODULE_KEY_MAP: Record<string, string> = {
+  Employees: "employees",
+  Upad: "upad",
+  Seth: "seths",
+  "Hisab Seth": "hisab_seth",
+  "Roll Inventory": "rolls",
+  Cutting: "cutting",
+  "Finished Goods": "finished_goods",
+  Partner: "partners",
+  Income: "income",
+  Expense: "expense",
+  "Cash Book": "cashbook",
+  Reports: "reports"
+}
+
 export function QuickAccess() {
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  const [showSheetsButton, setShowSheetsButton] = useState(true)
+
+  useEffect(() => {
+    fetch("/api/super-admin/visibility")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          if (json.data.modules) setVisibility(json.data.modules)
+          if (json.data.operations?.allow_sheets_sync_button !== undefined) {
+            setShowSheetsButton(json.data.operations.allow_sheets_sync_button)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const displayedModules = modules.filter((mod) => {
+    const key = MODULE_KEY_MAP[mod.name]
+    if (!key) return true
+    return visibility[key] !== false
+  })
+
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-base font-bold text-foreground">Quick Access</h2>
-        <Link
-          href="/google-sheets"
-          className="flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[10px] font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all"
-          title="Live Google Sheets sync for all 12 modules"
-        >
-          <Cloud className="h-3 w-3 text-emerald-600" />
-          <span>Sheets Sync</span>
-        </Link>
+        {showSheetsButton && (
+          <Link
+            href="/google-sheets"
+            className="flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[10px] font-bold text-foreground ring-1 ring-border/70 hover:bg-muted active:scale-95 shadow-2xs transition-all"
+            title="Live Google Sheets sync for all 12 modules"
+          >
+            <Cloud className="h-3 w-3 text-emerald-600" />
+            <span>Sheets Sync</span>
+          </Link>
+        )}
       </div>
       <div className="grid grid-cols-4 gap-3 md:grid-cols-6">
-        {modules.map((mod) => {
+        {displayedModules.map((mod) => {
           const isEmployees = mod.name === "Employees"
           const isUpad = mod.name === "Upad"
           const isSeth = mod.name === "Seth"
@@ -81,4 +124,3 @@ export function QuickAccess() {
     </section>
   )
 }
-

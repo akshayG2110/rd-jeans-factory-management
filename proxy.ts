@@ -8,7 +8,9 @@ const encodedSecret = new TextEncoder().encode(JWT_SECRET)
 // Public API endpoints that do NOT require an authentication token
 const PUBLIC_API_PATHS = [
   "/api/auth/login",
-  "/api/health"
+  "/api/health",
+  "/api/super-admin/auth/login",
+  "/api/super-admin/visibility"
 ]
 
 export async function proxy(request: NextRequest) {
@@ -44,7 +46,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!token) {
-    token = request.cookies.get("rd_token")?.value || ""
+    token = request.cookies.get("rd_token")?.value || request.cookies.get("super_admin_token")?.value || ""
   }
 
   // 3. API Routes Auth Guard (/api/*)
@@ -102,6 +104,11 @@ export async function proxy(request: NextRequest) {
   }
 
   // 4. Web Page Routes Auth Guard (UI Pages)
+  // Super Admin portal pages handle their own authentication at /super-admin/login
+  if (pathname.startsWith("/super-admin") || pathname === "/admin") {
+    return NextResponse.next()
+  }
+
   const userCookie = request.cookies.get("rd_user")?.value || request.cookies.get("rd_token")?.value
 
   // When visiting /login
